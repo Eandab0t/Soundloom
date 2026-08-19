@@ -1,0 +1,25 @@
+[project]
+name = "vividly-musicaly"
+version = "0.1.0"
+description = "Local music library manager and download organizer"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "aiosqlite>=0.20",
+    "mutagen>=1.47",
+    "yt-dlp>=2025.6",
+    "aiofiles>=24.1",
+    "aiohttp>=3.10",
+    "apscheduler>=3.10",
+    "pydantic>=2.8",
+    "websockets>=13.0",
+    "packaging>=24.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+bigpickle = "backend.main:run"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

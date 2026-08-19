@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Data (runtime files, not source)
+data/library.db
+data/covers/
+data/updates/
+data/logs/
+data/settings.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Pytest
+.pytest_cache/
+
+# AI chat logs (large files)
+Ai Chats/

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Big Pickle - Music Library</title>
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="logo">Big Pickle</span>
+    </div>
+    <div class="topbar-center">
+      <input type="text" id="global-search" placeholder="Search library... (Ctrl+K)" class="search-input">
+    </div>
+    <div class="topbar-right">
+      <button id="scan-btn" class="btn btn-sm btn-primary" onclick="Library.scan()">Scan Library</button>
+      <button id="theme-toggle" class="icon-btn" onclick="App.toggleTheme()" title="Toggle theme"></button>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <nav class="sidebar">
+      <a href="#library" class="nav-item active" data-tab="library"><span class="nav-icon">&#127925;</span><span class="nav-label">Library</span></a>
+      <a href="#queue" class="nav-item" data-tab="queue"><span class="nav-icon">&#128229;</span><span class="nav-label">Queue</span><span class="badge" id="queue-badge" style="display:none">0</span></a>
+      <a href="#add" class="nav-item" data-tab="add"><span class="nav-icon">+</span><span class="nav-label">Add Source</span></a>
+      <a href="#watch" class="nav-item" data-tab="watch"><span class="nav-icon">&#128065;</span><span class="nav-label">Watch</span></a>
+      <a href="#metadata" class="nav-item" data-tab="metadata"><span class="nav-icon">&#9998;</span><span class="nav-label">Metadata</span></a>
+      <a href="#settings" class="nav-item" data-tab="settings"><span class="nav-icon">&#9881;</span><span class="nav-label">Settings</span></a>
+      <a href="#logs" class="nav-item" data-tab="logs"><span class="nav-icon">&#128196;</span><span class="nav-label">Logs</span></a>
+    </nav>
+
+    <main class="content">
+
+      <!-- LIBRARY TAB -->
+      <div id="tab-library" class="tab-panel active">
+        <div class="section-header">
+          <h2 class="section-title">Library</h2>
+          <div class="section-actions">
+            <select id="lib-sub-tab" class="select select-sm" onchange="Library.switchView(this.value)">
+              <option value="tracks">Tracks</option>
+              <option value="artists">Artists</option>
+              <option value="albums">Albums</option>
+            </select>
+          </div>
+        </div>
+        <div class="lib-toolbar">
+          <input type="text" id="lib-search" class="input input-sm" placeholder="Filter..." oninput="Library.debounceSearch()">
+          <select id="lib-artist-filter" class="select select-sm" onchange="Library.loadTracks()"><option value="">All Artists</option></select>
+          <select id="lib-format-filter" class="select select-sm" onchange="Library.loadTracks()">
+            <option value="">All Formats</option><option value="mp3">MP3</option><option value="m4a">M4A</option><option value="flac">FLAC</option><option value="ogg">OGG</option>
+          </select>
+        </div>
+        <div id="lib-content">
+          <div class="empty-state" id="lib-empty">
+            <div class="empty-icon">&#127925;</div>
+            <p>No music found</p>
+            <p class="text-muted">Click "Scan Library" to index your music folder</p>
+          </div>
+          <div id="lib-tracks-view" style="display:none">
+            <div class="table-container">
+              <table class="table" id="tracks-table">
+                <thead><tr>
+                  <th></th>
+                  <th class="sortable" data-sort="title" onclick="Library.sort('title')">Title</th>
+                  <th class="sortable" data-sort="artist" onclick="Library.sort('artist')">Artist</th>
+                  <th class="sortable" data-sort="album" onclick="Library.sort('album')">Album</th>
+                  <th class="sortable" data-sort="duration" onclick="Library.sort('duration')">Duration</th>
+                  <th class="sortable" data-sort="format" onclick="Library.sort('format')">Format</th>
+                  <th class="sortable" data-sort="file_size" onclick="Library.sort('file_size')">Size</th>
+                </tr></thead>
+                <tbody id="tracks-body"></tbody>
+              </table>
+            </div>
+            <div class="pagination" id="tracks-pagination"></div>
+          </div>
+          <div id="lib-artists-view" style="display:none"></div>
+          <div id="lib-albums-view" style="display:none"></div>
+        </div>
+        <div id="lib-progress" style="display:none">
+          <div class="progress-bar"><div class="progress-fill" id="scan-progress-fill" style="width:0%"></div></div>
+          <span class="text-muted" id="scan-status-text">Scanning...</span>
+        </div>
+      </div>
+
+      <!-- QUEUE TAB -->
+      <div id="tab-queue" class="tab-panel">
+        <div class="section-header">
+          <h2 class="section-title">Download Queue</h2>
+          <div class="section-actions">
+            <button class="btn btn-sm btn-secondary" onclick="Queue.clearCompleted()">Clear Completed</button>
+            <button class="btn btn-sm btn-secondary" onclick="Queue.clearFailed()">Clear Failed</button>
+          </div>
+        </div>
+        <div class="queue-tabs">
+          <button class="tab-btn active" data-tab="active" onclick="Queue.switchTab('active')">Active</button>
+          <button class="tab-btn" data-tab="completed" onclick="Queue.switchTab('completed')">Completed</button>
+          <button class="tab-btn" data-tab="failed" onclick="Queue.switchTab('failed')">Failed</button>
+        </div>
+        <div id="queue-list">
+          <div class="empty-state"><div class="empty-icon">&#128229;</div><p>No downloads in queue</p></div>
+        </div>
+      </div>
+
+      <!-- ADD SOURCE TAB -->
+      <div id="tab-add" class="tab-panel">
+        <div class="section-header"><h2 class="section-title">Add Source</h2></div>
+        <div class="card">
+          <div class="form-group">
+            <label class="label">URL, Search Query, or Spotify Link</label>
+            <div class="input-row">
+              <input type="text" id="add-url" class="input" placeholder="Paste URL or search... (YouTube, Spotify, etc.)" onkeydown="if(event.key==='Enter')AddSource.preview()">
+              <button class="btn btn-primary" id="add-submit-btn" onclick="AddSource.preview()">Preview</button>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="label">Quality Profile</label>
+              <select id="add-quality" class="select">
+                <option value="balanced">Balanced (MP3 320k)</option>
+                <option value="best">Best Quality (FLAC)</option>
+                <option value="ipod_saver">iPod Saver (M4A 128k)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="label">Output Format</label>
+              <select id="add-format" class="select">
+                <option value="mp3">MP3</option><option value="m4a">M4A/AAC</option><option value="flac">FLAC</option><option value="ogg">OGG</option><option value="wav">WAV</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div id="add-results" style="display:none">
+          <h3 class="section-title" style="margin-top:16px">Search Results</h3>
+          <div id="add-results-list"></div>
+        </div>
+        <div id="add-preview" style="display:none">
+          <h3 class="section-title" style="margin-top:16px">Download Preview</h3>
+          <div class="card" id="add-preview-card"></div>
+          <div class="input-row" style="margin-top:12px">
+            <button class="btn btn-primary" onclick="AddSource.confirmDownload()">Confirm &amp; Download</button>
+            <button class="btn btn-secondary" onclick="AddSource.cancelPreview()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- WATCH TAB -->
+      <div id="tab-watch" class="tab-panel">
+        <div class="section-header"><h2 class="section-title">Artist Watch</h2></div>
+        <div class="card">
+          <div class="input-row">
+            <input type="text" id="watch-artist-input" class="input" placeholder="Artist name to follow..." onkeydown="if(event.key==='Enter')Watch.add()">
+            <button class="btn btn-primary" onclick="Watch.add()">Follow</button>
+          </div>
+        </div>
+        <div id="watch-list" style="margin-top:12px">
+          <div class="empty-state"><div class="empty-icon">&#128065;</div><p>No artists being watched</p><p class="text-muted">Follow an artist to auto-download new releases</p></div>
+        </div>
+      </div>
+
+      <!-- METADATA TAB -->
+      <div id="tab-metadata" class="tab-panel">
+        <div class="section-header"><h2 class="section-title">Metadata Editor</h2></div>
+        <div class="card">
+          <div class="form-group">
+            <label class="label">Select Track</label>
+            <input type="text" id="meta-search" class="input" placeholder="Search for a track..." oninput="Metadata.searchDebounce()">
+          </div>
+          <div id="meta-results" style="display:none"></div>
+        </div>
+        <div id="meta-editor" style="display:none">
+          <div class="card">
+            <div class="meta-header">
+              <div class="cover-art cover-art-lg" id="meta-cover"></div>
+              <div class="meta-info">
+                <h3 id="meta-title-display"></h3>
+                <p class="text-muted" id="meta-artist-display"></p>
+              </div>
+            </div>
+            <div class="form-grid">
+              <div class="form-group"><label class="label">Title</label><input type="text" id="meta-title" class="input"></div>
+              <div class="form-group"><label class="label">Artist</label><input type="text" id="meta-artist" class="input"></div>
+              <div class="form-group"><label class="label">Album Artist</label><input type="text" id="meta-album-artist" class="input"></div>
+              <div class="form-group"><label class="label">Album</label><input type="text" id="meta-album" class="input"></div>
+              <div class="form-group"><label class="label">Track #</label><input type="number" id="meta-track-num" class="input"></div>
+              <div class="form-group"><label class="label">Disc #</label><input type="number" id="meta-disc-num" class="input"></div>
+              <div class="form-group"><label class="label">Year</label><input type="number" id="meta-year" class="input"></div>
+              <div class="form-group"><label class="label">Genre</label><input type="text" id="meta-genre" class="input"></div>
+            </div>
+            <div class="form-group" style="margin-top:12px">
+              <button class="btn btn-primary" onclick="Metadata.save()">Save Tags</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS TAB -->
+      <div id="tab-settings" class="tab-panel">
+        <div class="section-header"><h2 class="section-title">Settings</h2></div>
+        <div class="collapsible" id="settings-general">
+          <div class="collapsible-header" onclick="App.toggleCollapse('settings-general')"><span>General</span><span class="arrow">&#9660;</span></div>
+          <div class="collapsible-body">
+            <div class="form-group"><label class="label">Theme</label>
+              <select id="set-theme" class="select" onchange="App.setTheme(this.value)">
+                <option value="dark">Dark</option><option value="light">Light</option>
+              </select>
+            </div>
+            <div class="form-group"><label class="label">Library Path</label><input type="text" id="set-library-path" class="input"></div>
+            <div class="form-group"><label class="label">Download Path</label><input type="text" id="set-download-path" class="input"></div>
+          </div>
+        </div>
+        <div class="collapsible" id="settings-quality">
+          <div class="collapsible-header" onclick="App.toggleCollapse('settings-quality')"><span>Quality Profiles</span><span class="arrow">&#9660;</span></div>
+          <div class="collapsible-body">
+            <table class="table"><thead><tr><th>Profile</th><th>Format</th><th>Bitrate</th><th>Description</th></tr></thead><tbody>
+              <tr><td>Best Quality</td><td>FLAC</td><td>Lossless</td><td>Maximum quality</td></tr>
+              <tr><td>Balanced</td><td>MP3</td><td>320k</td><td>High quality, reasonable size</td></tr>
+              <tr><td>iPod Saver</td><td>M4A</td><td>128k</td><td>Small files for iPod</td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="collapsible" id="settings-org">
+          <div class="collapsible-header" onclick="App.toggleCollapse('settings-org')"><span>Folder Organization</span><span class="arrow">&#9660;</span></div>
+          <div class="collapsible-body">
+            <div class="form-group"><label class="label">Folder Template</label>
+              <select id="set-template" class="select">
+                <option value="{album_artist}\{album}\{track_number} - {title}.{format}">Album Artist / Album / Track</option>
+                <option value="{artist}\{year} - {album}\{track_number} - {title}.{format}">Artist / Year - Album / Track</option>
+                <option value="{title}.{format}">Flat (title only)</option>
+              </select>
+            </div>
+            <div class="form-group"><label class="label">Duplicate Handling</label>
+              <select id="set-dupes" class="select">
+                <option value="keep_separate">Keep Separate</option>
+                <option value="merge">Merge</option>
+                <option value="prompt">Prompt Each Time</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="collapsible" id="settings-downloads">
+          <div class="collapsible-header" onclick="App.toggleCollapse('settings-downloads')"><span>Downloads</span><span class="arrow">&#9660;</span></div>
+          <div class="collapsible-body">
+            <div class="form-group"><label class="label">Max Concurrent Downloads</label><input type="number" id="set-max-concurrent" class="input" value="3" min="1" max="10"></div>
+            <div class="form-group"><label class="label">Max Retries</label><input type="number" id="set-max-retries" class="input" value="3" min="0" max="10"></div>
+          </div>
+        </div>
+        <div class="collapsible" id="settings-server">
+          <div class="collapsible-header" onclick="App.toggleCollapse('settings-server')"><span>Server</span><span class="arrow">&#9660;</span></div>
+          <div class="collapsible-body">
+            <div class="form-group">
+              <label class="label">Auto-Shutdown</label>
+              <div class="toggle-row">
+                <label class="toggle-switch" title="Shut down server when browser tab is closed">
+                  <input type="checkbox" id="set-auto-shutdown" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+                <span class="toggle-label">Shut down server when no browser is connected</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="label">Shutdown Timeout (seconds)</label>
+              <input type="number" id="set-shutdown-timeout" class="input" value="30" min="10" max="300">
+              <span class="text-muted">How long to wait after last heartbeat before shutting down</span>
+            </div>
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:16px"><button class="btn btn-primary" onclick="Settings.save()">Save Settings</button></div>
+      </div>
+
+      <!-- LOGS TAB -->
+      <div id="tab-logs" class="tab-panel">
+        <div class="section-header">
+          <h2 class="section-title">Logs</h2>
+          <div class="section-actions">
+            <button class="btn btn-sm btn-secondary" onclick="Logs.refresh()">Refresh</button>
+            <button class="btn btn-sm btn-secondary" onclick="Logs.clear()">Clear</button>
+          </div>
+        </div>
+        <div class="log-container" id="log-output"><pre class="log-pre">No logs yet.</pre></div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span id="status-tracks">0 tracks</span>
+    <span id="status-artists">0 artists</span>
+    <span id="status-albums">0 albums</span>
+    <span id="status-queue">Queue: idle</span>
+  </footer>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
