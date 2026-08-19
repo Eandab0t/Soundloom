@@ -1,8 +1,12 @@
-# VividlyMusicaly ("Big Pickle") — AI Handoff
+# ETuner — AI Handoff (BETA)
 
-**Purpose**: Local music library intelligence/management system. Manages 845+ MP3s, downloads from YouTube/SoundCloud/etc, auto-tags, auto-organizes into folder structures, with artist watching for new releases.
+**Purpose**: Music library management suite. Two components:
+1. **VividlyMusicaly ("Big Pickle")** — Web-based library intelligence system. Downloads from YouTube/SoundCloud/etc, auto-tags, auto-organizes.
+2. **E-Tuner Desktop** — Windows WPF app for offline tag fixing, dedup, sorting. Plus Python CLI for automation.
 
 **Runtime**: Python 3.12 + FastAPI + SQLite + vanilla HTML/CSS/JS SPA. Runs at `localhost:5555`. Auto-shuts down when browser closes (heartbeat watchdog).
+
+> **BETA STATUS**: This software is in beta. Expect bugs, missing features, and breaking changes.
 
 ---
 
@@ -28,8 +32,8 @@ Browser (SPA) ──WebSocket──▶ FastAPI ──aiosqlite──▶ SQLite D
 ## Directory Structure
 
 ```
-VividlyMusicaly/
-├── backend/
+ETuner/
+├── backend/                 # VividlyMusicaly - Python FastAPI web app
 │   ├── main.py              # FastAPI app, lifespan, WebSocket, auto-shutdown watchdog
 │   ├── config.py            # Settings persistence (data/settings.json), DEFAULTS dict
 │   ├── database.py          # SQLite schema (tracks/jobs/watched_artists), asyncio.Lock on writes
@@ -61,7 +65,20 @@ VividlyMusicaly/
 │   ├── index.html           # SPA shell: 7 tabs, topbar, sidebar, statusbar (297 lines)
 │   ├── css/styles.css       # Dark/light theme via CSS variables (213 lines)
 │   └── js/app.js            # Single-file SPA: all modules (754 lines)
-├── tests/                   # 150 tests (pytest + asyncio_mode=auto)
+├── etuner/                  # E-Tuner Desktop - Windows WPF + Python CLI
+│   ├── src/
+│   │   ├── etuner/          # Python source (run_etuner.py, build_exe.py)
+│   │   └── dotnet/          # .NET WPF source (csproj, xaml, cs files)
+│   │       ├── Converters/
+│   │       ├── Models/
+│   │       ├── Services/
+│   │       └── ViewModels/
+│   ├── tests/               # Python tests (8 files)
+│   ├── pyproject.toml
+│   ├── requirements.txt
+│   ├── config.json
+│   └── CHANGELOG.md
+├── tests/                   # VividlyMusicaly tests (150 tests, pytest + asyncio_mode=auto)
 ├── data/                    # Runtime data (SQLite DB, logs, settings, covers)
 ├── HANDOFF.md               # This file
 ├── run.bat                  # Windows launcher

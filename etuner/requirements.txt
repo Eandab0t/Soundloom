@@ -1,0 +1,10 @@
+# Runtime
+mutagen>=1.47
+requests>=2.31
+
+# Dev / test (not required to run etuner)
+# pytest>=8.0
+
+# Optional, only needed for `etuner fetch --method acoustid`:
+# the fpcalc binary from Chromaprint must also be installed and on PATH
+# (e.g. `apt install chromaprint` / `brew install chromaprint`).

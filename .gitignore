@@ -30,3 +30,7 @@ Desktop.ini
 
 # AI chat logs (large files)
 Ai Chats/
+
+# E-Tuner release (separate project)
+release/
+*.exe

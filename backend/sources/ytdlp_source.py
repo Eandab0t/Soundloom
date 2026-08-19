@@ -20,6 +20,7 @@ _YT_DLP_OPTS_BASE = {
     "no_warnings": True,
     "no_check_certificates": True,
     "extractor_args": {"youtube": {"skip": ["dash", "mpd"]}},
+    "cookiesfrombrowser": ("chrome",),
 }
 
 _URL_PATTERNS = [
@@ -84,11 +85,17 @@ class YtdlpResolver(SourceResolver):
     """Resolves YouTube/SoundCloud/etc URLs to metadata."""
 
     async def resolve(self, input_str: str) -> TrackMetadata:
-        def _extract():
-            opts = {**_YT_DLP_OPTS_BASE, "skip_download": True, "extract_flat": False}
+        def _extract(opts):
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(input_str, download=False)
-        info = await _run_extract(_extract)
+
+        opts = {**_YT_DLP_OPTS_BASE, "skip_download": True, "extract_flat": False}
+        try:
+            info = await _run_extract(lambda: _extract(opts))
+        except Exception:
+            opts.pop("cookiesfrombrowser", None)
+            logger.info("Retrying resolve without browser cookies")
+            info = await _run_extract(lambda: _extract(opts))
         return _info_to_track_metadata(info)
 
     def can_handle(self, input_str: str) -> bool:
@@ -114,17 +121,20 @@ class YtdlpDownloader(DownloadProvider):
                 if progress_callback:
                     progress_callback(100)
 
-        def _download():
-            opts = {
-                **_YT_DLP_OPTS_BASE,
-                "outtmpl": output_path + ".%(ext)s",
-                "progress_hooks": [_progress],
-            }
+        def _download(opts):
+            opts["outtmpl"] = output_path + ".%(ext)s"
+            opts["progress_hooks"] = [_progress]
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(candidate.url, download=True)
                 return info
 
-        info = await _run_extract(_download)
+        opts = {**_YT_DLP_OPTS_BASE}
+        try:
+            info = await _run_extract(lambda: _download(dict(opts)))
+        except Exception:
+            opts.pop("cookiesfrombrowser", None)
+            logger.info("Retrying download without browser cookies")
+            info = await _run_extract(lambda: _download(dict(opts)))
         actual_path = self._find_downloaded_file(output_path)
         return actual_path, info
 

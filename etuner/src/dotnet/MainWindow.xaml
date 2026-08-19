@@ -1,0 +1,245 @@
+﻿<Window x:Class="ETuner.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:vm="clr-namespace:ETuner.ViewModels"
+        xmlns:converters="clr-namespace:ETuner.Converters"
+        mc:Ignorable="d"
+        Title="E-Tuner" Height="760" Width="1200"
+        FontFamily="Segoe UI"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent">
+
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+
+    <Window.Resources>
+        <converters:StatusToBrushConverter x:Key="StatusToBrush"/>
+    </Window.Resources>
+
+    <Border x:Name="RootBorder" Background="{DynamicResource BackgroundLightBrush}" CornerRadius="10">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" Color="#44000000" Opacity="0.5" ShadowDepth="0" />
+        </Border.Effect>
+        <Border.Style>
+            <Style TargetType="Border">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding DarkThemeEnabled}" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource BackgroundDarkBrush}" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Custom Title Bar -->
+            <Border Grid.Row="0" Height="40" Background="{DynamicResource BackgroundDarkBrush}" MouseLeftButtonDown="OnTitleBarDrag">
+                <Grid>
+                    <TextBlock Text="E-Tuner" Foreground="White" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="16,0"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <Button x:Name="ThemeToggle" Click="OnThemeToggle" Style="{DynamicResource ModernButtonSecondary}"
+                                Width="36" Height="24" Margin="0,0,8,0" FontSize="10" Padding="0">
+                            <TextBlock Text="{Binding DarkThemeEnabled, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BooleanToThemeText}}" />
+                        </Button>
+                        <Button x:Name="MinimizeBtn" Click="OnMinimize" Style="{DynamicResource ModernButtonSecondary}"
+                                Width="36" Height="24" Margin="0,0,8,0" FontSize="10">_</Button>
+                        <Button x:Name="CloseBtn" Click="OnClose" Style="{DynamicResource ModernButtonDanger}"
+                                Width="36" Height="24" Margin="0,0,0,0" FontSize="10">x</Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Main content -->
+            <Grid Grid.Row="1" Margin="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="240"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="320"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Folder picker + Settings -->
+                <Border Grid.Column="0" Style="{DynamicResource ModernPanel}" Margin="0,0,8,0" Padding="16">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Folder" Style="{DynamicResource CardHeader}"/>
+
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBox Text="{Binding FolderPath, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{DynamicResource ModernTextBox}"
+                                        VerticalContentAlignment="Center"
+                                         DockPanel.Dock="Left" Width="160"/>
+                                <Button Content="Browse"
+                                        Command="{Binding BrowseFolderCommand}"
+                                        Style="{DynamicResource ModernButtonSecondary}"
+                                        Height="32" FontSize="12" Padding="12,4"
+                                        Margin="8,0,0,0" VerticalAlignment="Center"
+                                        DockPanel.Dock="Right"/>
+                            </DockPanel>
+
+                            <TextBlock Text="Naming Style" Style="{DynamicResource SectionHeader}"/>
+                            <ComboBox ItemsSource="{Binding Strategies}"
+                                      SelectedItem="{Binding NamingStrategy}"
+                                      DisplayMemberPath="DisplayName"
+                                      Style="{DynamicResource ModernComboBox}"
+                                      Height="36" Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding NamingStrategy.Description}"
+                                       TextWrapping="Wrap" FontStyle="Italic"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       FontSize="10" Margin="0,0,0,12"/>
+
+                            <Separator Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Tag Operations" Style="{DynamicResource CardHeader}"/>
+
+                            <CheckBox Content="Tag cleanup (all rules)"
+                                      IsChecked="{Binding TagCleanupEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,6"/>
+
+                            <CheckBox Content="Artist fixing (parent)"
+                                      IsChecked="{Binding ArtistFixingEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,12"/>
+
+                            <TextBlock Text="  Artist Fix Options"
+                                       Style="{DynamicResource SectionHeader}"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+                            <CheckBox Content="  Deduplicate artists"
+                                      IsChecked="{Binding DedupArtistsEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="8,0,0,6"/>
+                            <CheckBox Content="  Derive album_artist"
+                                      IsChecked="{Binding DeriveAlbumArtistEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="8,0,0,6"/>
+                            <CheckBox Content="  Trim whitespace"
+                                      IsChecked="{Binding TrimWhitespaceEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="8,0,0,6"/>
+                            <CheckBox Content="  Fix genre"
+                                      IsChecked="{Binding FixGenreEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="8,0,0,6"/>
+                            <CheckBox Content="  Fix title case"
+                                      IsChecked="{Binding FixTitleCaseEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="8,0,0,6"/>
+
+                            <CheckBox Content="  Song sorter (album_artist_sort)"
+                                      IsChecked="{Binding SongSorterEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,8,0,0"/>
+
+                            <Separator Margin="0,12,0,12"/>
+
+                            <TextBlock Text="File Operations" Style="{DynamicResource CardHeader}"/>
+
+                            <CheckBox Content="Backup before changes"
+                                      IsChecked="{Binding BackupBeforeChanges}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,6"/>
+                            <CheckBox Content="Preview mode (dry run)"
+                                      IsChecked="{Binding PreviewModeEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Scan Options" Style="{DynamicResource CardHeader}"/>
+
+                            <CheckBox Content="Recursive scan"
+                                      IsChecked="{Binding RecursiveScanEnabled}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,6"/>
+                            <CheckBox Content="Include hidden files"
+                                      IsChecked="{Binding IncludeHiddenFiles}"
+                                      Style="{DynamicResource ModernCheckBox}"
+                                      Margin="0,0,0,12"/>
+
+                            <Separator Margin="0,12,0,12"/>
+
+                            <Button Content="Rescan Folder"
+                                    Command="{Binding RescanCommand}"
+                                    Style="{DynamicResource ModernButton}"
+                                    Height="36" FontSize="13" FontWeight="SemiBold"
+                                    Margin="0,0,0,8"/>
+
+                            <Button Content="Update Preview"
+                                    Command="{Binding PreviewCommand}"
+                                    Style="{DynamicResource ModernButtonSecondary}"
+                                    Height="36" FontSize="13"
+                                    Margin="0,0,0,8"/>
+
+                            <Button Content="Rename All"
+                                    Command="{Binding RenameAllCommand}"
+                                    Style="{DynamicResource ModernButtonSuccess}"
+                                    Height="36" FontSize="13" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Center: DataGrid -->
+                <Border Grid.Column="1" Style="{DynamicResource ModernPanel}" Margin="8,0,8,0" Padding="8">
+                    <DataGrid ItemsSource="{Binding Files}"
+                              Style="{DynamicResource ModernDataGrid}"
+                              AutoGenerateColumns="False"
+                              CanUserSortColumns="True"
+                              CanUserResizeColumns="True"
+                              CanUserAddRows="False"
+                              HeadersVisibility="Column"
+                              FontSize="13">
+                        <DataGrid.Columns>
+                            <DataGridCheckBoxColumn Header="Sel" Binding="{Binding IsSelected}" Width="32"/>
+                            <DataGridTextColumn Header="Original Name" Binding="{Binding OriginalName}" Width="*"/>
+                            <DataGridTextColumn Header="Category" Binding="{Binding DetectedCategory}" Width="100"/>
+                            <DataGridTextColumn Header="Purpose" Binding="{Binding Purpose}" Width="160"/>
+                            <DataGridTextColumn Header="New Name" Binding="{Binding NewName}" Width="220"/>
+                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="80"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <!-- Right: Log -->
+                <Border Grid.Column="2" Background="{DynamicResource BackgroundDarkBrush}" 
+                        CornerRadius="6" Margin="8,0,0,0" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="Log" Style="{DynamicResource CardHeader}" 
+                                   Foreground="{DynamicResource BackgroundDarkTextBrush}"/>
+                        <Border Background="{DynamicResource BackgroundDarkAltBrush}" CornerRadius="4" Padding="8">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                          Background="{DynamicResource BackgroundDarkAltBrush}">
+                                <TextBlock Text="{Binding LogOutput}"
+                                           Style="{DynamicResource LogText}"
+                                           TextWrapping="Wrap"/>
+                            </ScrollViewer>
+                        </Border>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Bottom status bar -->
+            <Border Grid.Row="2" Background="{DynamicResource BackgroundDarkBrush}" Padding="12,8">
+                <DockPanel>
+                    <ProgressBar Width="100" Height="4" DockPanel.Dock="Left"
+                                 IsIndeterminate="{Binding IsScanning}" Margin="0,0,12,0"
+                                 Foreground="{DynamicResource PrimaryBrush}"/>
+                    <TextBlock Text="{Binding StatusText}"
+                               Foreground="{DynamicResource BackgroundDarkTextBrush}" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
+
+
+
+

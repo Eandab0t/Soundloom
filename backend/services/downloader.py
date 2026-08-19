@@ -104,13 +104,23 @@ async def _worker_loop():
 
 
 async def _pick_next_job() -> dict | None:
-    job = await fetch_one(
-        "SELECT * FROM jobs WHERE status='pending' ORDER BY created_at ASC LIMIT 1"
-    )
-    if job:
-        await _set_state(job["id"], JobState.RESOLVING)
-        job["status"] = "resolving"
-    return job
+    """Atomically claim the next pending job. Uses UPDATE+RETURNING to avoid races."""
+    from ..database import _db_lock
+    async with _db_lock:
+        row = await fetch_one(
+            "SELECT id FROM jobs WHERE status='pending' ORDER BY created_at ASC LIMIT 1"
+        )
+        if not row:
+            return None
+        job_id = row["id"]
+        await execute(
+            "UPDATE jobs SET status='resolving', updated_at=? WHERE id=? AND status='pending'",
+            (datetime.datetime.utcnow().isoformat(), job_id),
+        )
+        job = await fetch_one("SELECT * FROM jobs WHERE id=?", (job_id,))
+        if job:
+            job["status"] = "resolving"
+        return job
 
 
 async def _set_state(job_id: int, state: JobState, progress: float = None):
@@ -173,6 +183,14 @@ async def _process_job(job: dict):
         conf_level = confidence_level(match.confidence)
         logger.info(f"Job {job_id} match: {match.confidence}% ({conf_level})")
 
+        match_threshold = settings.get("match_threshold", 70)
+        if match.confidence < match_threshold:
+            raise DownloadError(
+                f"Match confidence {match.confidence}% below threshold {match_threshold}%: "
+                f"{match.explanation}",
+                recoverable=False,
+            )
+
         thumb_path = ""
         downloader = YtdlpDownloader()
         if candidate.source_type != SourceType.LOCAL:
@@ -190,9 +208,13 @@ async def _process_job(job: dict):
         dl_dir.mkdir(parents=True, exist_ok=True)
         dl_base = str(dl_dir / f"dl_{uuid.uuid4().hex[:12]}")
 
+        loop = asyncio.get_running_loop()
+
         def dl_progress(pct):
             mapped = 15 + (pct / 100) * 50
-            asyncio.ensure_future(_update_job(job_id, progress=mapped))
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future, _update_job(job_id, progress=mapped)
+            )
 
         actual_path, info = await downloader.download(candidate, dl_base, dl_progress)
         await _update_job(job_id, progress=65)

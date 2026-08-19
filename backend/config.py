@@ -22,6 +22,7 @@ DEFAULTS = {
     "default_quality": "balanced",
     "max_concurrent_downloads": 3,
     "max_retries": 3,
+    "match_threshold": 70,
     "auto_update": "notify",
     "watched_check_interval": 3600,
     "duplicate_policy": "keep_separate",
