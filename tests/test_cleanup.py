@@ -111,6 +111,26 @@ class TestCleanArtists:
         clean_artists(tags)
         assert tags["artist"] == "Drake"
 
+    def test_dedupes_repeated_words_within_part(self):
+        tags = {"artist": "plaxz plaxz, Beidant", "title": "Song"}
+        clean_artists(tags)
+        assert tags["artist"] == "plaxz, Beidant"
+
+    def test_dedupes_case_insensitive_across_parts(self):
+        tags = {"artist": "plaxz, Beidant, plaxz plaxz, beidant beidant", "title": "Song"}
+        clean_artists(tags)
+        assert tags["artist"] == "plaxz, Beidant"
+
+    def test_dedupes_mixed_case_preserves_first_casing(self):
+        tags = {"artist": "Repeatedword, Repeatedword, REPEATEDWORD", "title": "Song"}
+        clean_artists(tags)
+        assert tags["artist"] == "Repeatedword"
+
+    def test_preserves_legitimate_multi_word_artists(self):
+        tags = {"artist": "The Weeknd, The Beatles", "title": "Song"}
+        clean_artists(tags)
+        assert tags["artist"] == "The Weeknd, The Beatles"
+
     def test_ft_variant(self):
         tags = {"artist": "Drake ft. SZA", "title": "Song"}
         clean_artists(tags)

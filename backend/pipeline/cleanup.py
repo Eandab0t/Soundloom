@@ -217,12 +217,36 @@ def clean_artists(tags: dict) -> list[CleanupChange]:
         val = _s(tags.get(key, ""))
         if "," in val:
             parts = _RE_COMMA_SEP.split(val)
-            seen: list[str] = []
+
+            # Step 1: Deduplicate repeated words WITHIN each part
+            # "plaxz plaxz" → "plaxz", "beidant beidant" → "beidant"
+            cleaned_parts = []
             for part in parts:
                 norm = part.strip()
-                if norm and norm.lower() not in {s.lower() for s in seen}:
-                    seen.append(norm)
-            deduped = ", ".join(seen)
+                if not norm:
+                    continue
+                tokens = norm.split()
+                if not tokens:
+                    continue
+                seen_tokens: dict[str, str] = {}
+                unique_tokens: list[str] = []
+                for t in tokens:
+                    lower_t = t.lower()
+                    if lower_t not in seen_tokens:
+                        seen_tokens[lower_t] = t
+                        unique_tokens.append(t)
+                cleaned_parts.append(" ".join(unique_tokens))
+
+            # Step 2: Deduplicate across parts (case-insensitive)
+            seen: dict[str, str] = {}
+            final_parts: list[str] = []
+            for part in cleaned_parts:
+                lower_part = part.lower()
+                if lower_part not in seen:
+                    seen[lower_part] = part
+                    final_parts.append(part)
+
+            deduped = ", ".join(final_parts)
             if deduped != val:
                 old = val
                 tags[key] = deduped
