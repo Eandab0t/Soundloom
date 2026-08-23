@@ -23,11 +23,18 @@ _YT_DLP_OPTS_BASE = {
     "cookiesfrombrowser": ("chrome",),
 }
 
+# SoundCloud-specific: impersonate Chrome to avoid 403 rate limiting
+_YT_DLP_OPTS_SOUNDCLOUD = {
+    **_YT_DLP_OPTS_BASE,
+    "impersonate": "chrome",
+}
+
 _URL_PATTERNS = [
     (r"youtube\.com/watch", "youtube"),
     (r"youtu\.be/", "youtube"),
     (r"youtube\.com/playlist", "youtube"),
     (r"soundcloud\.com/", "soundcloud"),
+    (r"deezer\.com/", "deezer"),
     (r"vimeo\.com/", "vimeo"),
     (r"bandcamp\.com/", "bandcamp"),
     (r"twitch\.tv/", "twitch"),
@@ -128,12 +135,15 @@ class YtdlpDownloader(DownloadProvider):
                 info = ydl.extract_info(candidate.url, download=True)
                 return info
 
-        opts = {**_YT_DLP_OPTS_BASE}
+        # Use SoundCloud-specific options (with impersonate) for SoundCloud URLs
+        base_opts = _YT_DLP_OPTS_SOUNDCLOUD if candidate.source_type == SourceType.SOUNDCLOUD else _YT_DLP_OPTS_BASE
+        opts = {**base_opts}
         try:
             info = await _run_extract(lambda: _download(dict(opts)))
         except Exception:
             opts.pop("cookiesfrombrowser", None)
-            logger.info("Retrying download without browser cookies")
+            opts.pop("impersonate", None)
+            logger.info("Retrying download without browser cookies/impersonate")
             info = await _run_extract(lambda: _download(dict(opts)))
         actual_path = self._find_downloaded_file(output_path)
         return actual_path, info

@@ -24,6 +24,7 @@ class JobState(Enum):
 class SourceType(Enum):
     YOUTUBE = "youtube"
     SOUNDCLOUD = "soundcloud"
+    DEEZER = "deezer"
     LOCAL = "local"
     SPOTIFY = "spotify"
     UNKNOWN = "unknown"

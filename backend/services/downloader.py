@@ -30,6 +30,7 @@ from ..pipeline.normalize import parse_artists
 from ..pipeline.editor import apply_metadata_to_file
 from ..pipeline.cleanup import run_cleanup
 from ..sources.ytdlp_source import YtdlpResolver, YtdlpDownloader, detect_source
+from ..sources.deezer_source import DeezerResolver, DeezerDownloader, is_deezer_url, detect_deezer
 from ..services.converter import convert
 from ..services.organizer import organize_file
 from ..services.tagger import write_tags, read_tags
@@ -166,7 +167,16 @@ async def _process_job(job: dict):
     try:
         await _set_state(job_id, JobState.RESOLVING, 5)
         await emit_job_update(job_id, "resolving")
-        resolver = YtdlpResolver()
+
+        # Route to Deezer adapter if URL is from Deezer
+        is_deezer = is_deezer_url(source_url)
+        if is_deezer:
+            resolver = DeezerResolver()
+            source_type_str = detect_deezer(source_url) or "deezer"
+        else:
+            resolver = YtdlpResolver()
+            source_type_str = detect_source(source_url)
+
         meta = await resolver.resolve(source_url)
         await _update_job(job_id, title=meta.title, artist=meta.artist, progress=10)
 
@@ -174,7 +184,7 @@ async def _process_job(job: dict):
         await emit_job_update(job_id, "matching", 10)
         candidate = SourceCandidate(
             url=source_url,
-            source_type=SourceType(detect_source(source_url)),
+            source_type=SourceType(source_type_str) if source_type_str in [e.value for e in SourceType] else SourceType.UNKNOWN,
             title=meta.title,
             artist=meta.artist,
             duration=meta.duration,
@@ -192,7 +202,12 @@ async def _process_job(job: dict):
             )
 
         thumb_path = ""
-        downloader = YtdlpDownloader()
+        # Use Deezer adapter for Deezer URLs, yt-dlp for everything else
+        if is_deezer:
+            downloader = DeezerDownloader(bitrate="flac")
+        else:
+            downloader = YtdlpDownloader()
+
         if candidate.source_type != SourceType.LOCAL:
             try:
                 thumb_dir = Path(tempfile.gettempdir()) / "bigpickle"

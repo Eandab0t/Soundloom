@@ -391,7 +391,7 @@ const AddSource = {
       }
 
       if (webResults.length) {
-        const srcIcons = { youtube: '&#9654;', soundcloud: '&#9835;', musicbrainz: '&#9881;', spotify: '&#9836;', unknown: '&#8250;' };
+        const srcIcons = { youtube: '&#9654;', soundcloud: '&#9835;', deezer: '&#9833;', musicbrainz: '&#9881;', spotify: '&#9836;', unknown: '&#8250;' };
         html += '<div style="font-size:12px;font-weight:600;color:var(--text-muted);margin:12px 0 8px;">ONLINE RESULTS</div>';
         html += webResults.map((r, i) => `
           <div class="job-card" style="cursor:pointer;" onclick="AddSource.previewWebResult(${i})">
