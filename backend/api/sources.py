@@ -4,7 +4,7 @@ from .. import config
 from ..validation import validate_url, validate_folder_template
 from ..services.matcher import search_metadata
 from ..sources.ytdlp_source import resolve_url, is_supported_url, detect_source
-from ..pipeline.models import DownloadPlan, SourceCandidate, SourceType, QUALITY_PRESETS
+from ..pipeline.models import SourceCandidate, SourceType, QUALITY_PRESETS
 from ..pipeline.matcher import score_candidate, confidence_level
 from ..pipeline.normalize import parse_artists
 from ..services.organizer import preview_path
@@ -18,39 +18,6 @@ async def search(q: str = Query("")):
         return {"results": []}
     results = await search_metadata(q)
     return {"results": results}
-
-
-@router.post("/search-web")
-async def search_web(data: dict):
-    """Search across YouTube, Spotify, MusicBrainz, and SoundCloud for metadata.
-
-    Accepts either structured fields (title/artist/album) or a free-text query string.
-    """
-    title = data.get("title", "")
-    artist = data.get("artist", "")
-    album = data.get("album", "")
-    query = data.get("query", "")
-
-    if not title and not artist and not query:
-        raise HTTPException(400, "Need at least title, artist, or query to search")
-
-    try:
-        from ..services.metadata_search import search_for_track, search_all
-
-        kwargs = {}
-        client_id = config.get("spotify_client_id", "")
-        client_secret = config.get("spotify_client_secret", "")
-        if client_id and client_secret:
-            kwargs["client_id"] = client_id
-            kwargs["client_secret"] = client_secret
-
-        if query and not title and not artist:
-            results = await search_all(query, **kwargs)
-        else:
-            results = await search_for_track(title, artist, album, **kwargs)
-        return {"results": [vars(r) for r in results]}
-    except Exception as e:
-        raise HTTPException(500, f"Search failed: {e}")
 
 
 @router.post("/resolve")
@@ -98,14 +65,19 @@ async def preview_download(data: dict):
     parsed = parse_artists(artist)
 
     quality_name = data.get("quality", data.get("quality_profile", "balanced"))
+    if quality_name not in QUALITY_PRESETS:
+        raise HTTPException(400, f"Unknown quality profile: {quality_name}")
     output_format = data.get("format", data.get("output_format", "mp3"))
+    if output_format not in {"mp3", "m4a", "flac", "ogg", "wav"}:
+        raise HTTPException(400, f"Unsupported output format: {output_format}")
     settings = config.get_all()
     folder_template = settings.get("folder_template", "{album_artist}\\{album}\\{track_number} - {title}.{format}")
     validate_folder_template(folder_template)
 
+    source_name = detect_source(url)
     candidate = SourceCandidate(
         url=url,
-        source_type=SourceType(detect_source(url)),
+        source_type=SourceType(source_name) if source_name in {item.value for item in SourceType} else SourceType.UNKNOWN,
         title=title,
         artist=artist,
         duration=duration,
@@ -135,11 +107,11 @@ async def preview_download(data: dict):
         "format": output_format,
     }, lib_path, folder_template)
 
-    profile = QUALITY_PRESETS.get(quality_name, QUALITY_PRESETS["balanced"])
+    profile = QUALITY_PRESETS[quality_name]
 
     plan = {
         "url": url,
-        "source_type": detect_source(url),
+        "source_type": source_name,
         "title": title,
         "artist": artist,
         "primary_artist": parsed["primary"],
@@ -156,7 +128,7 @@ async def preview_download(data: dict):
         "match_warnings": match.warnings,
         "quality_profile": quality_name,
         "output_format": output_format,
-        "bitrate": profile.bitrate if hasattr(profile, 'bitrate') else "",
+        "bitrate": profile.bitrate,
         "destination_path": dest_path,
         "library_path": lib_path,
         "folder_template": folder_template,

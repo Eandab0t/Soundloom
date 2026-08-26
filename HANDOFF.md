@@ -22,10 +22,10 @@ Browser (SPA) ──WebSocket──▶ FastAPI ──aiosqlite──▶ SQLite D
      ├─ /api/watch/*             │  yt-dlp (YouTube/SoundCloud/etc)
      ├─ /api/autofix/*           │  mutagen (audio tags)
      ├─ /api/settings            │  FFmpeg (conversion)
-     └─ /ws/events               │  aiohttp (Spotify/MusicBrainz API)
+     └─ /ws/events               │  pydantic validation
 ```
 
-**Key pattern**: Pipeline adapter architecture. 7 ABC interfaces (`SourceResolver`, `SearchProvider`, `MatchProvider`, `DownloadProvider`, `Converter`, `TagProvider`, `Organizer`) in `backend/pipeline/interfaces.py`. Currently only yt-dlp adapter exists but new sources can be plugged in without changing the pipeline.
+**Key pattern**: Pipeline adapter architecture. The active resolver and downloader contracts (`SourceResolver`, `DownloadProvider`) live in `backend/pipeline/interfaces.py`. Source adapters implement them without changing the pipeline.
 
 ---
 
@@ -46,7 +46,7 @@ ETuner/
 │   ├── api/                 # 7 API routers (see endpoints below)
 │   ├── pipeline/            # Core pipeline logic
 │   │   ├── models.py        # JobState enum, TrackMetadata, SourceCandidate, QualityProfile
-│   │   ├── interfaces.py    # 7 ABC interfaces for pluggable adapters
+│   │   ├── interfaces.py    # Resolver and downloader contracts
 │   │   ├── normalize.py     # normalize_artist/title/album, parse_artists
 │   │   ├── matcher.py       # Weighted scoring (title 30%, artist 25%, album 15%, etc.)
 │   │   ├── editor.py        # apply_metadata_to_file (mutagen)
@@ -58,7 +58,6 @@ ETuner/
 │   │   ├── organizer.py     # Template-based file organization + dedup
 │   │   ├── scanner.py       # Library reconciliation scan (fingerprint-based diff)
 │   │   ├── matcher.py       # Local library search
-│   │   └── metadata_search.py  # Multi-source search (YouTube/Spotify/MusicBrainz/SoundCloud)
 │   └── sources/
 │       └── ytdlp_source.py  # yt-dlp adapter: YtdlpResolver + YtdlpDownloader
 ├── frontend/
@@ -125,7 +124,7 @@ version INTEGER, applied_at TEXT
 | Router | Prefix | Key Endpoints |
 |--------|--------|---------------|
 | `library` | `/api/library` | `GET /tracks` (search/sort/filter/paginate), `GET /tracks/{id}`, `PUT /tracks/{id}`, `GET /artists`, `GET /artists/{name}`, `GET /albums`, `GET /stats`, `GET /scan`, `GET /scan/status` |
-| `sources` | `/api/sources` | `POST /resolve`, `POST /preview` (DownloadPlan), `POST /confirm`, `GET /search`, `POST /search-web` (multi-source with free-text query) |
+| `sources` | `/api/sources` | `POST /resolve`, `POST /preview` (DownloadPlan), `POST /confirm`, `GET /search` |
 | `queue` | `/api/queue` | `GET /` (filtered), `POST /` (add with dedup), `DELETE /{id}`, `POST /{id}/retry`, `GET /stats`, `POST /clear-completed`, `POST /clear-failed` |
 | `watch` | `/api/watch` | `GET /`, `POST /` (add artist), `PUT /{id}`, `DELETE /{id}` |
 | `autofix` | `/api/autofix` | `POST /scan`, `POST /fix-all`, `POST /fix-file`, `GET /preview/{track_id}` |
@@ -166,12 +165,12 @@ pending → resolving → matching → downloading → converting → tagging �
 
 | Module | Responsibility |
 |--------|---------------|
-| `Library` | Track list with search/sort/pagination, artist/album sub-views, "Search Web" button per artist, scan trigger |
+| `Library` | Track list with search/sort/pagination, artist/album sub-views, scan trigger |
 | `Queue` | Active/completed/failed download jobs with progress, retry, clear |
-| `AddSource` | URL paste or text search → parallel local+web search → preview DownloadPlan → confirm → queue |
+| `AddSource` | URL paste or local text search → preview DownloadPlan → confirm → queue |
 | `Watch` | Artist follow list for auto-downloading new releases |
 | `Metadata` | Tag editor for existing library files |
-| `Settings` | Library path, quality defaults, folder template, server config, Spotify creds |
+| `Settings` | Library path, quality defaults, folder template, server config |
 | `Logs` | Server log viewer |
 
 ---
@@ -220,9 +219,6 @@ pending → resolving → matching → downloading → converting → tagging �
 
 - Full library management (search, sort, filter, edit, scan)
 - Download pipeline with yt-dlp (YouTube, SoundCloud, Vimeo, Bandcamp, Twitch)
-- Multi-source metadata search (YouTube, MusicBrainz, SoundCloud; Spotify needs creds)
-- Web search in Add Source tab (parallel local + online results with Preview buttons)
-- Artist "Search Web" button in Artists view
 - Auto-fix/cleanup pipeline (E-Tuner rules adapted, runs during download)
 - Artist watch system (CRUD only — no auto-download polling yet)
 - Real-time WebSocket events with auto-reconnect
@@ -238,8 +234,6 @@ pending → resolving → matching → downloading → converting → tagging �
 ## What's Not Yet Built
 
 - Artist Watch auto-download polling (CRUD works, no background checker)
-- Spotify URL detection in `detect_source()`
-- Settings UI for Spotify credentials
 - Lossy→lossless upgrade warning
 - API documentation (OpenAPI/Swagger)
 - Playlist management (table exists, no UI)
@@ -251,7 +245,6 @@ pending → resolving → matching → downloading → converting → tagging �
 1. **No virtual scrolling**: Library renders all 100 tracks as DOM nodes — will throttle at 1000+
 2. **No batch queue operations**: "Retry All Failed" and "Clear All Failed" buttons exist but no bulk actions for active jobs
 3. **No atomic file processing**: Downloads write directly to temp dir, scanner could index partial files
-4. **No local metadata cache**: Every web search hits external APIs (rate limit risk)
 5. **No rate-limit/backoff on yt-dlp**: HTTP 429 errors from YouTube will fail jobs without retry
 6. **Watch polling not implemented**: watched_artists table exists but no background job checks for new releases
 
@@ -269,7 +262,6 @@ pending → resolving → matching → downloading → converting → tagging �
 ### 2. Backend & Extraction Resilience
 
 - **yt-dlp hardening**: Automated cookie management, fallback user-agents, rate-limit handling with backoff
-- **Local metadata cache**: Cache search results in SQLite or filesystem to avoid repeated API hits
 - **Batch queue operations**: "Retry All Failed" bulk action
 
 ### 3. System Utility & Infrastructure

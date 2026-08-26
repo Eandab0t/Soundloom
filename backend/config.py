@@ -24,14 +24,11 @@ DEFAULTS = {
     "max_retries": 3,
     "match_threshold": 70,
     "auto_update": "notify",
-    "watched_check_interval": 3600,
     "duplicate_policy": "keep_separate",
     "server_port": 5555,
     "server_host": "127.0.0.1",
     "auto_shutdown": True,
     "shutdown_timeout": 30,
-    "spotify_client_id": "",
-    "spotify_client_secret": "",
 }
 
 _cache: dict | None = None

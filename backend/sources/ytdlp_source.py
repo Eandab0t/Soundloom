@@ -200,7 +200,9 @@ async def resolve_url(url: str) -> dict:
 
 async def download_audio(url: str, output_path: str, progress_callback=None) -> tuple:
     """Legacy download for backward compat."""
-    candidate = SourceCandidate(url=url, source_type=SourceType(detect_source(url)))
+    source = detect_source(url)
+    source_type = SourceType(source) if source in {item.value for item in SourceType} else SourceType.UNKNOWN
+    candidate = SourceCandidate(url=url, source_type=source_type)
     downloader = YtdlpDownloader()
     return await downloader.download(candidate, output_path, progress_callback)
 

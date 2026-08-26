@@ -1,7 +1,6 @@
 """VividlyMusicaly (Big Pickle) - Main application entry point."""
 import sys
 import os
-import signal
 import asyncio
 import logging
 from pathlib import Path

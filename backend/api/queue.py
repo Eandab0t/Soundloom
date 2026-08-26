@@ -8,7 +8,9 @@ router = APIRouter(prefix="/api/queue", tags=["queue"])
 
 @router.get("")
 async def list_jobs(status: str = Query(None)):
-    if status:
+    if status == "active":
+        rows = await fetch_all("SELECT * FROM jobs WHERE status NOT IN ('complete', 'failed', 'cancelled') ORDER BY created_at DESC LIMIT 100")
+    elif status:
         rows = await fetch_all("SELECT * FROM jobs WHERE status=? ORDER BY created_at DESC LIMIT 100", (status,))
     else:
         rows = await fetch_all("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 100")
@@ -78,7 +80,7 @@ async def clear_failed():
 
 @router.get("/stats")
 async def queue_stats():
-    active = await fetch_one("SELECT COUNT(*) as c FROM jobs WHERE status='downloading'")
+    active = await fetch_one("SELECT COUNT(*) as c FROM jobs WHERE status NOT IN ('pending', 'complete', 'failed', 'cancelled')")
     pending = await fetch_one("SELECT COUNT(*) as c FROM jobs WHERE status='pending'")
     completed = await fetch_one("SELECT COUNT(*) as c FROM jobs WHERE status='complete'")
     failed = await fetch_one("SELECT COUNT(*) as c FROM jobs WHERE status='failed'")

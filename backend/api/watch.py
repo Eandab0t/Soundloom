@@ -1,6 +1,6 @@
 """Watch / artist follow endpoints."""
 from fastapi import APIRouter, HTTPException
-from ..database import fetch_all, fetch_one, execute
+from ..database import fetch_all, execute
 
 router = APIRouter(prefix="/api/watch", tags=["watch"])
 
@@ -39,13 +39,3 @@ async def update_watched(watch_id: int, data: dict):
 async def delete_watched(watch_id: int):
     await execute("DELETE FROM watched_artists WHERE id=?", (watch_id,))
     return {"status": "deleted"}
-
-
-@router.post("/{watch_id}/check")
-async def check_watched(watch_id: int):
-    return {"status": "checked", "new_releases": 0}
-
-
-@router.post("/check-all")
-async def check_all_watched():
-    return {"status": "checked", "artists": 0, "new_releases": 0}

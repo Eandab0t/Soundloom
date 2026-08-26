@@ -2,7 +2,6 @@
 import asyncio
 import aiosqlite
 import logging
-from pathlib import Path
 from contextlib import asynccontextmanager
 from . import config
 

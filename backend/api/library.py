@@ -14,8 +14,7 @@ ALLOWED_SORTS = {
 @router.get("/scan")
 async def trigger_scan():
     import asyncio
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, lambda: asyncio.run(scan_folder()))
+    asyncio.create_task(scan_folder())
     return {"status": "started"}
 
 

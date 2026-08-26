@@ -27,6 +27,9 @@ class SourceType(Enum):
     DEEZER = "deezer"
     LOCAL = "local"
     SPOTIFY = "spotify"
+    VIMEO = "vimeo"
+    BANDCAMP = "bandcamp"
+    TWITCH = "twitch"
     UNKNOWN = "unknown"
 
 

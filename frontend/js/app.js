@@ -182,7 +182,6 @@ const Library = {
         <div class="artist-row" data-artist="${esc(a.name)}">
           <span class="artist-name">${esc(a.name)}</span>
           <span class="artist-count">${a.track_count} tracks</span>
-          <button class="btn btn-sm" style="margin-left:auto;font-size:11px;padding:3px 8px;" onclick="event.stopPropagation(); Library.searchArtistWeb('${esc(a.name)}')">Search Web</button>
         </div>
       `).join('') : '<div class="empty-state"><p>No artists found</p></div>';
       el.querySelectorAll('.artist-row').forEach(row => {
@@ -212,12 +211,6 @@ const Library = {
     document.getElementById('lib-sub-tab').value = 'tracks';
     document.getElementById('lib-artist-filter').value = name;
     this.switchView('tracks');
-  },
-
-  searchArtistWeb(name) {
-    document.getElementById('add-url').value = name;
-    switchTab('add');
-    setTimeout(() => AddSource.preview(), 100);
   },
 
   filterAlbum(name) {
@@ -277,7 +270,7 @@ const Queue = {
 
   async load() {
     try {
-      const statusMap = { active: 'downloading', completed: 'complete', failed: 'failed' };
+      const statusMap = { active: 'active', completed: 'complete', failed: 'failed' };
       const data = await API.get(`/api/queue?status=${statusMap[this.currentTab] || ''}`);
       this.jobs = data.jobs || [];
       this.render();
@@ -361,15 +354,11 @@ const AddSource = {
     resultsDiv.style.display = '';
 
     try {
-      const [localData, webData] = await Promise.all([
-        API.get(`/api/library/tracks?search=${encodeURIComponent(query)}&limit=10`).catch(() => ({ tracks: [] })),
-        API.post('/api/sources/search-web', { query }).catch(() => ({ results: [] })),
-      ]);
-      const tracks = localData.tracks || [];
-      const webResults = webData.results || [];
+      const data = await API.get(`/api/library/tracks?search=${encodeURIComponent(query)}&limit=10`);
+      const tracks = data.tracks || [];
 
       const list = document.getElementById('add-results-list');
-      if (!tracks.length && !webResults.length) {
+      if (!tracks.length) {
         list.innerHTML = '<div class="text-muted" style="padding:12px;">No results found. Try a URL instead.</div>';
         btn.textContent = 'Search';
         btn.disabled = false;
@@ -390,28 +379,6 @@ const AddSource = {
         `).join('');
       }
 
-      if (webResults.length) {
-        const srcIcons = { youtube: '&#9654;', soundcloud: '&#9835;', deezer: '&#9833;', musicbrainz: '&#9881;', spotify: '&#9836;', unknown: '&#8250;' };
-        html += '<div style="font-size:12px;font-weight:600;color:var(--text-muted);margin:12px 0 8px;">ONLINE RESULTS</div>';
-        html += webResults.map((r, i) => `
-          <div class="job-card" style="cursor:pointer;" onclick="AddSource.previewWebResult(${i})">
-            <div style="display:flex;gap:10px;align-items:flex-start;flex:1;min-width:0;">
-              ${r.thumbnail_url ? `<img src="${esc(r.thumbnail_url)}" style="width:48px;height:48px;border-radius:6px;object-fit:cover;flex-shrink:0;">` : ''}
-              <div class="job-info" style="min-width:0;">
-                <div class="job-title">${esc(r.title || 'Unknown')}</div>
-                <div class="job-meta">${esc(r.artist || '')} ${r.album ? '&middot; ' + esc(r.album) : ''} ${r.duration ? '&middot; ' + fmtDuration(r.duration) : ''}</div>
-                <div class="job-meta" style="font-size:11px;">${srcIcons[r.source] || ''} ${esc(r.source)} ${r.confidence ? '&middot; ' + Math.round(r.confidence) + '%' : ''}</div>
-              </div>
-            </div>
-            <div class="job-actions">
-              <button class="btn btn-sm btn-primary" onclick="event.stopPropagation(); AddSource.previewWebResult(${i})">Preview</button>
-            </div>
-          </div>
-        `).join('');
-
-        AddSource._webResults = webResults;
-      }
-
       list.innerHTML = html;
       btn.textContent = 'Search';
       btn.disabled = false;
@@ -421,20 +388,6 @@ const AddSource = {
       btn.textContent = 'Search';
       btn.disabled = false;
     }
-  },
-
-  async previewWebResult(index) {
-    const r = (this._webResults || [])[index];
-    if (!r || !r.source_url) { showToast('No URL for this result', 'error'); return; }
-    const url = r.source_url;
-    const input = document.getElementById('add-url');
-    input.value = url;
-    const format = document.getElementById('add-format').value;
-    const quality = document.getElementById('add-quality').value;
-    const previewDiv = document.getElementById('add-preview');
-    const resultsDiv = document.getElementById('add-results');
-    const btn = document.getElementById('add-submit-btn');
-    await this.previewUrl(url, format, quality, previewDiv, resultsDiv, btn);
   },
 
   async previewUrl(url, format, quality, previewDiv, resultsDiv, btn) {
@@ -542,7 +495,6 @@ const Watch = {
               <input type="checkbox" ${w.auto_download ? 'checked' : ''} onchange="Watch.toggleAuto(${w.id}, this.checked)">
               <span class="toggle-slider"></span>
             </label>
-            <button class="btn btn-sm btn-secondary" disabled title="Coming soon: auto-check for new releases" style="opacity:0.5;">Check Now</button>
             <button class="btn btn-sm btn-danger" onclick="Watch.remove(${w.id})">&#10005;</button>
           </div>
         </div>
@@ -551,7 +503,6 @@ const Watch = {
   },
 
   async toggleAuto(id, val) { try { await API.put(`/api/watch/${id}`, { auto_download: val ? 1 : 0 }); } catch (e) {} },
-  async check(id) { showToast('Checking for new releases...', 'info'); },
   async remove(id) { try { await API.del(`/api/watch/${id}`); this.load(); showToast('Removed from watch list', 'info'); } catch (e) {} }
 };
 
