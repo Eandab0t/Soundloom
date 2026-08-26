@@ -53,16 +53,6 @@ async def emit_job_update(job_id: int, status: str, progress: float = 0,
     })
 
 
-async def emit_library_change(action: str, track_id: int = 0,
-                              track_count: int = 0):
-    """Convenience: emit a library change event."""
-    await emit("library_change", {
-        "action": action,
-        "track_id": track_id,
-        "track_count": track_count,
-    })
-
-
 async def emit_log(level: str, message: str, source: str = ""):
     """Convenience: emit a log event for the frontend log viewer."""
     await emit("log", {

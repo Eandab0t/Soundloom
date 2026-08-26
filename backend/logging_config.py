@@ -7,7 +7,6 @@ import json
 import logging
 import logging.handlers
 import sys
-import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -77,27 +76,6 @@ class HumanFormatter(logging.Formatter):
             parts.append(f"\n{self.formatException(record.exc_info)}")
 
         return " ".join(parts)
-
-
-class PerfTimer:
-    """Context manager for timing operations."""
-
-    def __init__(self, operation: str, logger: logging.Logger = None):
-        self.operation = operation
-        self.logger = logger or logging.getLogger("bigpickle.perf")
-        self.start = 0.0
-        self.elapsed = 0.0
-
-    def __enter__(self):
-        self.start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args):
-        self.elapsed = (time.perf_counter() - self.start) * 1000
-        self.logger.info(
-            f"{self.operation} completed in {self.elapsed:.0f}ms",
-            extra={"operation": self.operation, "elapsed_ms": self.elapsed},
-        )
 
 
 def set_request_id(rid: str):

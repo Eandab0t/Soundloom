@@ -1,4 +1,4 @@
-"""Log, update, and heartbeat endpoints."""
+"""Log and heartbeat endpoints."""
 import time
 import logging
 from pathlib import Path
@@ -28,16 +28,6 @@ async def get_logs():
         return {"logs": []}
     lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
     return {"logs": lines[-500:]}
-
-
-@router.get("/api/update/check")
-async def check_update():
-    return {"status": "up_to_date", "current": "0.1.0", "latest": "0.1.0"}
-
-
-@router.post("/api/update/apply")
-async def apply_update():
-    return {"status": "no_update"}
 
 
 @router.get("/api/status")

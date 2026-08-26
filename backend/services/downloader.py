@@ -20,7 +20,7 @@ from ..errors import (
     DownloadError, ResolveError, ConversionError, TagError,
     OrganizeError, log_error, ErrorContext,
 )
-from ..events import emit_job_update, emit_library_change
+from ..events import emit_job_update, emit
 from ..pipeline.models import (
     JobState, TrackMetadata, SourceCandidate, SourceType,
     QualityProfile, QUALITY_PRESETS,
@@ -283,7 +283,7 @@ async def _process_job(job: dict):
         await _add_to_library(final_path, meta, source_url)
         await _set_state(job_id, JobState.COMPLETE, 100)
         await emit_job_update(job_id, "complete", 100, output_path=final_path)
-        await emit_library_change("added")
+        await emit("library_change", {"action": "added"})
         await _update_job(job_id, output_path=final_path)
         logger.info(f"Job {job_id} complete: {final_path}")
 
