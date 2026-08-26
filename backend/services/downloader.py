@@ -62,6 +62,7 @@ async def start_worker():
 
 
 async def stop_worker():
+    global _worker_tasks
     _stop_event.set()
     for t in _worker_tasks:
         t.cancel()

@@ -39,7 +39,6 @@ ETuner/
 │   ├── database.py          # SQLite schema (tracks/jobs/watched_artists), asyncio.Lock on writes
 │   ├── migrations.py        # Versioned schema migrations with schema_version table
 │   ├── errors.py            # Exception hierarchy: VividlyError → 13 subclasses
-│   ├── retry.py             # retry() decorator with exponential backoff
 │   ├── validation.py        # validate_path (anti-traversal), validate_folder_template, sanitize_filename
 │   ├── logging_config.py    # JsonFormatter, HumanFormatter (color), RotatingFileHandler
 │   ├── events.py            # Pub/sub event bus → WebSocket broadcasting
