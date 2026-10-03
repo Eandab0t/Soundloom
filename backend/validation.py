@@ -28,7 +28,9 @@ def validate_path(path: str, base_dir: str | Path) -> Path:
     base = Path(base_dir).resolve()
     target = (base / path).resolve()
 
-    if not str(target).startswith(str(base)):
+    # Use path ancestry, not string prefix: with base "/music/library" a
+    # sibling like "/music/library-backup/x.mp3" passes a startswith() check.
+    if target != base and base not in target.parents:
         raise PathTraversalError(f"Path escapes base directory: {path}")
 
     return target

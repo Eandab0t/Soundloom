@@ -20,10 +20,7 @@ async def apply_metadata_to_file(file_path: str, metadata: TrackMetadata,
 
     tag_dict = metadata.to_dict()
     try:
-        success = await write_tags(file_path, tag_dict, cover_path=cover_path)
-        if not success:
-            logger.error(f"Tag write returned False for {file_path}")
-            return False
+        await write_tags(file_path, tag_dict, cover_path=cover_path)
     except Exception as e:
         logger.error(f"Tag write failed for {file_path}: {e}")
         return False

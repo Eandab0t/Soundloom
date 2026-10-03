@@ -192,7 +192,9 @@ async def fix_duplicate_artists(req: FixDuplicatesRequest = None):
                     else:
                         file_aa = str(tags.get("album_artist") or "")
                 if change["file"] == "fixed":
-                    if not await write_tags(fp, tags):
+                    try:
+                        await write_tags(fp, tags)
+                    except Exception:
                         change["file"] = "unreadable"
                         errors.append(f"Track {tid}: tag write failed")
             except Exception as e:

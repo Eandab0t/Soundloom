@@ -11,9 +11,15 @@ logger = logging.getLogger(__name__)
 
 _subscribers: list[asyncio.Queue] = []
 
+# A subscriber that stops draining (backgrounded tab, suspended laptop) would
+# otherwise grow its queue without bound. Cap it: on overflow we drop the
+# subscriber so its backlog cannot exhaust memory. Queues are per-connection,
+# so this only ever costs a reconnecting client, never correctness.
+MAX_QUEUE_SIZE = 200
+
 
 async def subscribe() -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue(maxsize=MAX_QUEUE_SIZE)
     _subscribers.append(q)
     return q
 
@@ -39,6 +45,9 @@ async def emit(event_type: str, data: dict = None):
             dead.append(q)
     for q in dead:
         _subscribers.remove(q)
+        logger.warning(
+            "Dropped event subscriber: queue exceeded %d events", MAX_QUEUE_SIZE
+        )
 
 
 async def emit_job_update(job_id: int, status: str, progress: float = 0,

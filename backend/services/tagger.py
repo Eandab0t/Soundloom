@@ -8,6 +8,8 @@ from mutagen.flac import FLAC, Picture
 from mutagen.oggvorbis import OggVorbis
 import mutagen
 
+from ..errors import TagError
+
 logger = logging.getLogger(__name__)
 
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wav", ".wma"}
@@ -59,22 +61,38 @@ async def read_tags(file_path: str) -> dict:
     return tags
 
 
-async def write_tags(file_path: str, tags: dict, cover_path: str = None) -> bool:
+async def write_tags(file_path: str, tags: dict, cover_path: str = None) -> None:
+    """Write tags to an audio file.
+
+    Contract: returns normally on success, raises ``TagError`` on any
+    failure. This used to return False, which several callers ignored - a
+    failed write looked exactly like a successful one, leaving the DB and the
+    file on disk disagreeing about the metadata. Failure is now always loud.
+    """
     p = Path(file_path)
     ext = p.suffix.lower()
     try:
         if ext == ".mp3":
-            return _write_id3(p, tags, cover_path)
+            ok = _write_id3(p, tags, cover_path)
         elif ext in (".m4a", ".aac"):
-            return _write_mp4(p, tags, cover_path)
+            ok = _write_mp4(p, tags, cover_path)
         elif ext == ".flac":
-            return _write_flac(p, tags, cover_path)
+            ok = _write_flac(p, tags, cover_path)
         elif ext == ".ogg":
-            return _write_ogg(p, tags, cover_path)
+            ok = _write_ogg(p, tags, cover_path)
+        else:
+            raise TagError(
+                f"Unsupported format for tag writing: {ext or p.name}",
+                code="tag_unsupported_format",
+            )
+    except TagError:
+        raise
     except Exception as e:
         logger.error(f"Error writing tags to {p.name}: {e}")
-        return False
-    return False
+        raise TagError(f"Failed to write tags to {p.name}: {e}") from e
+
+    if not ok:
+        raise TagError(f"Tag write failed for {p.name}")
 
 
 def _read_cover(path: str) -> bytes | None:

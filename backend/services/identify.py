@@ -256,6 +256,9 @@ async def apply_candidate(candidate_id: int) -> dict:
     backup = backup_tracks([track_row] if track_row else [], settings)
 
     merged = {**tags, **changes}
+    # A failed write must not be recorded as applied: that would leave the DB
+    # claiming metadata the file does not have. Let it raise so the caller
+    # sees the failure and the candidate stays pending.
     await write_tags(file_path, merged, cover_path=tags.get("cover_art_path") or None)
 
     assignments = ", ".join(f"{k}=?" for k in changes)

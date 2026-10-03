@@ -92,8 +92,19 @@ MIGRATIONS: list[Migration] = [
     Migration(
         version=7,
         name="playlist_hub",
+        # Non-destructive: the pre-hub `playlists` table only ever held
+        # (id, name) and was never written to, but ALTER-based migration keeps
+        # any rows a user or test happened to create. The old version did
+        # `DROP TABLE IF EXISTS playlists`, which destroyed playlist data on
+        # upgrade - never use DROP here again.
         sql="""
-        DROP TABLE IF EXISTS playlists;
+        ALTER TABLE playlists ADD COLUMN description TEXT DEFAULT '';
+        ALTER TABLE playlists ADD COLUMN origin TEXT DEFAULT 'manual';
+        ALTER TABLE playlists ADD COLUMN origin_ref TEXT DEFAULT '';
+        -- SQLite forbids a non-constant DEFAULT in ADD COLUMN, so the new
+        -- column starts empty and is backfilled below.
+        ALTER TABLE playlists ADD COLUMN updated_at TEXT DEFAULT '';
+        UPDATE playlists SET updated_at = COALESCE(created_at, datetime('now')) WHERE updated_at IS NULL OR updated_at = '';
         CREATE TABLE IF NOT EXISTS playlists (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,

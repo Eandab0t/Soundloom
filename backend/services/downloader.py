@@ -26,7 +26,7 @@ from ..errors import (
     DownloadError, ResolveError, ConversionError, TagError,
     OrganizeError, log_error, ErrorContext,
 )
-from ..events import emit_job_update, emit
+from ..events import emit_job_update, emit, emit_log
 from ..pipeline.models import (
     JobState, TrackMetadata, SourceCandidate, SourceType,
     QualityProfile, QUALITY_PRESETS,
@@ -486,7 +486,15 @@ async def _process_job(job: dict):
             logger.info(f"Job {job_id} cleanup: {len(cleanup_result.changes)} fixes")
             for ch in cleanup_result.changes:
                 logger.debug(f"  {ch.field}: '{ch.before}' → '{ch.after}' ({ch.rule})")
-        await write_tags(conv_path, tag_data, cover_path=thumb_path)
+        try:
+            await write_tags(conv_path, tag_data, cover_path=thumb_path)
+        except Exception as exc:
+            # The audio is already downloaded and converted at this point, so a
+            # tag failure must not discard the file. Surface it on the job and
+            # continue - the organizer writes tags again on the final copy.
+            logger.warning("Job %s: tag write failed on %s: %s", job_id, conv_path, exc)
+            await _update_job(job_id, error=f"Tag write failed: {exc}")
+            await emit_log("warning", f"Tag write failed for job {job_id}: {exc}", source="tagger")
         await _update_job(job_id, progress=90)
 
         await _set_state(job_id, JobState.ORGANIZING, 90)

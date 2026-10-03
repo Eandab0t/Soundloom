@@ -508,8 +508,8 @@ async def auto_fix_file(file_path: str, case_mode: str = "off",
         return result
 
     try:
-        ok = await write_tags(file_path, tags)
-        result.success = ok
+        await write_tags(file_path, tags)
+        result.success = True
     except Exception as exc:
         logger.exception("Failed to write tags to %s", file_path)
         result.success = False
