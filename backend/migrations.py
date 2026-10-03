@@ -92,9 +92,9 @@ MIGRATIONS: list[Migration] = [
     Migration(
         version=7,
         name="playlist_hub",
-        # Non-destructive: the pre-hub `playlists` table only ever held
-        # (id, name) and was never written to, but ALTER-based migration keeps
-        # any rows a user or test happened to create. The old version did
+        # Non-destructive: the pre-hub `playlists` table held
+        # (id, name, created_at) and was never written to, but an ALTER-based
+        # migration keeps any rows that do exist. The old version did
         # `DROP TABLE IF EXISTS playlists`, which destroyed playlist data on
         # upgrade - never use DROP here again.
         sql="""
