@@ -1,0 +1,22 @@
+[project]
+name = "soundloom"
+version = "0.2.2"
+description = "Weave new music into your library: watch artists, sync playlists, download, clean up, convert"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "aiosqlite>=0.20",
+    "mutagen>=1.47",
+    "yt-dlp>=2025.6",
+    "pydantic>=2.8",
+    "aiohttp>=3.9",
+]
+
+[project.scripts]
+soundloom = "backend.main:run"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

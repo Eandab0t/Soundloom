@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Runtime data (DB, real settings with credentials, logs, exports, backups…)
+# Everything in data/ is machine-local; only the placeholder example ships.
+data/*
+!data/settings.example.json
+
+# Local agent bookkeeping
+.freebuff/
+
+# Project ops doc (private: machine paths, library history)
+HANDOFF.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Pytest
+.pytest_cache/
+
+# Desktop build artifacts
+dist/
+build/
+*.exe
+
+# AI chat logs (large files)
+Ai Chats/
+
+# E-Tuner release (separate project)
+release/
