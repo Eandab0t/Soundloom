@@ -5,6 +5,7 @@ import { Player } from '../player.js';
 export const Library = {
   tracks: [], total: 0, page: 1, perPage: 100, sortBy: 'title', order: 'ASC',
   subView: 'tracks', _albumFilter: '', statusFilter: '', state: null,
+  _bfTimer: null, _moves: {},
 
   async loadTracks() {
     const search = document.getElementById('lib-search')?.value || '';
@@ -112,6 +113,23 @@ export const Library = {
       if (!track) return;
       btn.addEventListener('click', (e) => { e.stopPropagation(); this.archiveTrack(track); });
     });
+    tbody.querySelectorAll('[data-restore-move]').forEach(btn => {
+      const track = this.tracks.find(t => t.id === Number(btn.dataset.restoreMove));
+      const move = track && this._moves[track.id];
+      if (!track || !move) return;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.applyLocated(track, move.discovered_path);
+      });
+    });
+    tbody.querySelectorAll('[data-detail]').forEach(btn => {
+      const track = this.tracks.find(t => t.id === Number(btn.dataset.detail));
+      if (!track) return;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.toggleProvenance(track, btn);
+      });
+    });
     tbody.querySelectorAll('[data-restore]').forEach(btn => {
       const track = this.tracks.find(t => t.id === Number(btn.dataset.restore));
       if (!track) return;
@@ -133,8 +151,17 @@ export const Library = {
       return `<button class="btn ghost xs" type="button" data-restore="${t.id}">Restore</button>`;
     }
     if (t.file_status === 'missing') {
-      return `<button class="btn ghost xs" type="button" data-locate="${t.id}">Locate file</button>` +
-             `<button class="btn ghost xs" type="button" data-archive="${t.id}">Archive</button>`;
+      const move = this._moves[t.id];
+      // Proof beats a prompt. With an identical digest on disk, restoring
+      // is the obvious action and Locate is the fallback, not the reverse.
+      const primary = move
+        ? `<button class="btn xs lib-restore" type="button" data-restore-move="${t.id}"`
+          + ` title="Same SHA-256 found at ${esc(move.discovered_path)}">`
+          + `Restore this file</button>`
+        : `<button class="btn ghost xs" type="button" data-locate="${t.id}">Locate file</button>`;
+      return primary +
+             `<button class="btn ghost xs" type="button" data-archive="${t.id}">Archive</button>` +
+             `<button class="btn ghost xs lib-more" type="button" data-detail="${t.id}">Details</button>`;
     }
     return '';
   },
@@ -161,14 +188,175 @@ export const Library = {
     }
 
     if (found) {
+      // An identical SHA-256 is proof, so this is the default action and
+      // the manual path is the thing you have to ask for - not the reverse.
       const ok = confirm(
-        `Found the same audio at:\n\n${found.discovered_path}\n\n` +
-        `SHA-256 ${found.sha256.slice(0, 16)}… matches.\n\n` +
-        `Point this track at that file?`);
+        `Found the same audio elsewhere in your library.\n\n` +
+        `  ${found.discovered_path}\n\n` +
+        `SHA-256 ${found.sha256.slice(0, 16)}… is identical, so this is the ` +
+        `same file at a new path.\n\n` +
+        `Restore this file to the track?\n` +
+        `(Cancel to enter a different path yourself.)`);
       if (ok) await this.applyLocated(t, found.discovered_path);
+      else this.promptForPath(t);
       return;
     }
     this.promptForPath(t);
+  },
+
+  /**
+   * The provenance record for one track, shown inline.
+   *
+   * `never_acquired` renders as a real answer rather than an empty panel:
+   * it means the acquisition table has no row for this track, which is
+   * exactly what someone needs to know before concluding anything about
+   * where the file went.
+   */
+  async toggleProvenance(t, btn) {
+    const row = btn.closest('tr');
+    const existing = row.querySelector('.lib-detail');
+    if (existing) { existing.remove(); return; }
+    try {
+      const d = await API.get(`/api/library/tracks/${t.id}/provenance`);
+      const acq = d.acquisitions[0];
+      const tr = document.createElement('tr');
+      tr.className = 'lib-detail-row';
+      const cell = document.createElement('td');
+      cell.colSpan = 9;
+      const parts = [`<b>${d.never_acquired ? 'Never acquired' : 'Provenance'}</b>`];
+      if (acq) {
+        if (acq.sha256) {
+          parts.push(`SHA-256 <code>${esc(acq.sha256.slice(0, 24))}…</code>`);
+          parts.push(fmtSize(acq.file_size));
+        } else {
+          parts.push('no content hash recorded');
+        }
+        if (acq.completed_at) parts.push(`recorded ${esc(acq.completed_at.slice(0, 19))}`);
+        if (acq.source_url) parts.push(`from ${esc(acq.source_url)}`);
+        if (acq.job_id) parts.push(`job ${acq.job_id}`);
+        if (acq.source === 'backfill') parts.push('(added by backfill, not a download)');
+      } else {
+        parts.push('Indexed before Soundloom recorded where files came from, so ' +
+          'there is no record. It cannot be identified by content - Locate ' +
+          'will need a path.');
+      }
+      if (d.operations.length) {
+        parts.push(`${d.operations.length} journal entr${d.operations.length === 1 ? 'y' : 'ies'}`);
+      }
+      cell.innerHTML = parts.join(' · ');
+      tr.appendChild(cell);
+      row.after(tr);
+    } catch (e) {
+      showToast('Could not load provenance: ' + e.message, 'error');
+    }
+  },
+
+  // --- provenance backfill --------------------------------------------
+
+  async loadBackfill() {
+    try {
+      const d = await API.get('/api/library/provenance/backfill');
+      this._renderBackfill(d);
+      const run = d.run;
+      // Poll only while something is actually running. An idle app asking
+      // about progress every second is pointless when the row is durable.
+      clearTimeout(this._bfTimer);
+      this._bfTimer = (run && run.running)
+        ? setTimeout(() => this.loadBackfill(), 700)
+        : null;
+    } catch (e) { /* the panel is informative, not required */ }
+  },
+
+  _renderBackfill(d) {
+    const p = d.pending || {};
+    const run = d.run;
+    const panel = document.getElementById('bf-panel');
+    if (!panel) return;
+    const summary = document.getElementById('bf-summary');
+    const note = document.getElementById('bf-note');
+    const show = (id, on) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = !on;
+    };
+
+    if (!run) {
+      summary.textContent = p.remaining
+        ? `${p.remaining} of ${p.present} files have no recorded hash`
+        : `All ${p.present} files have a recorded SHA-256`;
+      show('bf-run', p.remaining > 0);
+      show('bf-resume', false); show('bf-pause', false); show('bf-cancel', false);
+      show('bf-progress', false);
+      return;
+    }
+
+    const live = run.running;
+    const resumable = !live && run.resumable;
+    summary.textContent = `${run.processed_files} / ${run.total_files} files` +
+      ` · ${(run.bytes_processed / 1e9).toFixed(2)} GB of ${(run.bytes_total / 1e9).toFixed(2)} GB` +
+      ` · ${run.status}`;
+
+    show('bf-run', !live && !resumable && p.remaining > 0);
+    show('bf-resume', resumable);
+    show('bf-pause', live);
+    show('bf-cancel', live || resumable);
+    show('bf-progress', true);
+
+    const fill = document.getElementById('bf-fill');
+    if (fill) fill.style.width = `${run.percent}%`;
+    const stats = document.getElementById('bf-stats');
+    if (stats) {
+      stats.textContent = `${run.percent}% · ${run.error_count} error(s)` +
+        (run.completed_at ? ` · finished ${run.completed_at.slice(11, 19)}` : '');
+    }
+    const cur = document.getElementById('bf-current');
+    if (cur) cur.textContent = run.last_path
+      ? run.last_path.split(/[\\/]/).slice(-2).join('/') : '';
+
+    if (note) {
+      let msg = '';
+      if (run.status === 'interrupted') {
+        msg = 'A previous run was interrupted. Resume continues from where it stopped.';
+      } else if (run.status === 'paused') {
+        msg = 'Paused. Finished work is kept.';
+      } else if (run.status === 'complete') {
+        msg = 'Complete. Every file has a recorded SHA-256, so a future ' +
+              'disappearance can be proven rather than guessed.';
+      } else if (run.error) {
+        msg = `Failed: ${run.error}`;
+      }
+      note.textContent = msg;
+      note.hidden = !msg;
+    }
+  },
+
+  async backfillStart() {
+    try {
+      const r = await API.post('/api/library/provenance/backfill/start', {});
+      if (r.action === 'already_running') showToast('Already running', 'info');
+      else showToast('Backfill started - it runs in the background', 'success');
+      this.loadBackfill();
+    } catch (e) { showToast('Could not start: ' + e.message, 'error'); }
+  },
+
+  async backfillResume() {
+    try {
+      const r = await API.post('/api/library/provenance/backfill/resume', {});
+      showToast(r.action === 'resumed' ? 'Resumed' : `Nothing to resume (${r.action})`, 'info');
+      this.loadBackfill();
+    } catch (e) { showToast('Could not resume: ' + e.message, 'error'); }
+  },
+
+  async backfillPause() {
+    try { await API.post('/api/library/provenance/backfill/pause', {}); this.loadBackfill(); }
+    catch (e) { showToast('Could not pause: ' + e.message, 'error'); }
+  },
+
+  async backfillCancel() {
+    try {
+      await API.post('/api/library/provenance/backfill/cancel', {});
+      showToast('Stopped. Files already hashed keep their records.', 'info');
+      this.loadBackfill();
+    } catch (e) { showToast('Could not cancel: ' + e.message, 'error'); }
   },
 
   /**
@@ -233,6 +421,27 @@ export const Library = {
     if (sel) sel.value = value || '';
     this.loadTracks();
     this.loadState();
+    // Only the Missing view can have suggestions, so only it pays for the
+    // lookup. A move here is exact-hash proof, which is why it can change
+    // the primary action without asking.
+    if (this.statusFilter === 'missing') this.loadMoves();
+  },
+
+  /**
+   * Exact-hash moved suggestions, fetched once per visit to Missing.
+   *
+   * Every entry is proof: only an identical SHA-256 can match. A missing
+   * track with no recorded hash cannot appear, and gets the manual Locate
+   * instead - which is the correct fallback, not a lesser one.
+   */
+  async loadMoves() {
+    try {
+      const d = await API.get('/api/library/moves');
+      const moves = d.moves || [];
+      this._moves = {};
+      for (const m of moves) this._moves[m.track_id] = m;
+      if (this.statusFilter === 'missing') this.renderTracks();
+    } catch (e) { /* suggestions are an enhancement, never a blocker */ }
   },
 
   /**
@@ -436,6 +645,7 @@ export const Library = {
       if (summary) summary.textContent =
         `${s.total_tracks} tracks · ${s.total_artists} artists · ${s.total_albums} albums`;
       this.loadState();
+      this.loadBackfill();
     } catch (e) {}
   },
 };

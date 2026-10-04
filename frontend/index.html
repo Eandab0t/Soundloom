@@ -129,6 +129,29 @@
             </button>
           </div>
 
+          <div class="bf-panel" id="bf-panel">
+            <div class="bf-head">
+              <span class="bf-title">Provenance</span>
+              <span class="bf-summary" id="bf-summary">Checking…</span>
+              <div class="bf-actions">
+                <button class="btn ghost xs" type="button" id="bf-run"
+                        onclick="Library.backfillStart()">Run backfill</button>
+                <button class="btn ghost xs" type="button" id="bf-resume"
+                        onclick="Library.backfillResume()" hidden>Resume</button>
+                <button class="btn ghost xs" type="button" id="bf-pause"
+                        onclick="Library.backfillPause()" hidden>Pause</button>
+                <button class="btn ghost xs" type="button" id="bf-cancel"
+                        onclick="Library.backfillCancel()" hidden>Cancel</button>
+              </div>
+            </div>
+            <div class="bf-progress" id="bf-progress" hidden>
+              <div class="bf-bar"><div class="bf-fill" id="bf-fill"></div></div>
+              <div class="bf-stats" id="bf-stats"></div>
+              <div class="bf-current" id="bf-current"></div>
+            </div>
+            <div class="bf-note" id="bf-note" hidden></div>
+          </div>
+
           <div class="toolbar" id="lib-toolbar">
             <input type="text" id="lib-search" class="input sm grow" placeholder="Filter tracks…" oninput="Library.debounceSearch()">
             <select id="lib-artist-filter" class="input sm" onchange="Library.loadTracks()"><option value="">All artists</option></select>
