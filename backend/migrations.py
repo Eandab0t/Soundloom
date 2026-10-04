@@ -228,6 +228,51 @@ MIGRATIONS: list[Migration] = [
             ON match_decisions(created_at DESC);
         """,
     ),
+    Migration(
+        version=11,
+        name="library_state_and_acquisition",
+        # Two independent axes, previously conflated into one column.
+        #
+        # `file_status` answers "is the bytes still where we left them?" and is
+        # owned by the filesystem checker. `library_status` answers "is the user
+        # still collecting this?" and is owned by the user. Archive is the
+        # second axis: it hides a record from active views while keeping the
+        # row, its metadata, its original path and its provenance. It is a
+        # database state and touches no file, which is what makes it reversible
+        # in a way that deleting a row or a file never is.
+        #
+        # `acquisition` is the forensic record that turns the next disappearance
+        # from an inference into an answer. A log line ("Job 42 complete") is
+        # gone after rotation; this table records where the file came from, how
+        # big it was, and its SHA-256 - so a file that turns up somewhere else
+        # can be proven to be the same file rather than merely similar.
+        sql="""
+        ALTER TABLE tracks ADD COLUMN library_status TEXT DEFAULT 'active';
+        ALTER TABLE tracks ADD COLUMN archived_at TEXT;
+        ALTER TABLE tracks ADD COLUMN archived_reason TEXT DEFAULT '';
+        UPDATE tracks SET library_status = 'active'
+            WHERE library_status IS NULL OR library_status = '';
+        CREATE INDEX IF NOT EXISTS idx_tracks_library_status
+            ON tracks(library_status);
+        CREATE INDEX IF NOT EXISTS idx_tracks_state
+            ON tracks(library_status, file_status);
+        CREATE TABLE IF NOT EXISTS acquisition (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER,
+            track_id INTEGER,
+            source TEXT DEFAULT '',
+            source_url TEXT DEFAULT '',
+            completed_at TEXT DEFAULT (datetime('now')),
+            file_path TEXT DEFAULT '',
+            file_size INTEGER DEFAULT 0,
+            sha256 TEXT DEFAULT '',
+            organizer_result TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_acquisition_track ON acquisition(track_id);
+        CREATE INDEX IF NOT EXISTS idx_acquisition_sha ON acquisition(sha256);
+        CREATE INDEX IF NOT EXISTS idx_acquisition_job ON acquisition(job_id);
+        """,
+    ),
 ]
 
 

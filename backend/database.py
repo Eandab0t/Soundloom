@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     source_url TEXT DEFAULT '',
     source_type TEXT DEFAULT 'local',
     file_status TEXT DEFAULT 'present',
+    library_status TEXT DEFAULT 'active',
+    archived_at TEXT,
+    archived_reason TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -80,6 +83,19 @@ CREATE TABLE IF NOT EXISTS playlists (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS acquisition (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER,
+    track_id INTEGER,
+    source TEXT DEFAULT '',
+    source_url TEXT DEFAULT '',
+    completed_at TEXT DEFAULT (datetime('now')),
+    file_path TEXT DEFAULT '',
+    file_size INTEGER DEFAULT 0,
+    sha256 TEXT DEFAULT '',
+    organizer_result TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS synced_playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -107,6 +123,11 @@ CREATE TABLE IF NOT EXISTS watched_artists (
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album);
 CREATE INDEX IF NOT EXISTS idx_tracks_album_artist ON tracks(album_artist);
+-- idx_tracks_library_status is created by migration 11, not here:
+-- SCHEMA runs before migrations, and on an upgraded database the
+-- column does not exist yet, so indexing it here fails outright.
+CREATE INDEX IF NOT EXISTS idx_acquisition_track ON acquisition(track_id);
+CREATE INDEX IF NOT EXISTS idx_acquisition_sha ON acquisition(sha256);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 """
 

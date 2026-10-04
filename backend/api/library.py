@@ -4,9 +4,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
+import asyncio
+from datetime import datetime, timezone
+from pathlib import Path
+
 from .. import config
 from ..database import fetch_all, fetch_one, execute
-from ..services.scanner import scan_folder, get_scan_status
+from ..services.scanner import scan_folder, get_scan_status, reconcile_library
+from ..services import acquisition
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -91,6 +96,7 @@ async def list_tracks(
     album: str = "",
     format: str = "",
     status: str = "",
+    library_status: str = Query("active"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -109,10 +115,18 @@ async def list_tracks(
     if format:
         where.append("format = ?")
         params.append(format)
+    if library_status != "all":
+        where.append("library_status = ?")
+        params.append(library_status)
     if status:
         where.append("file_status = ?")
         params.append(status)
-    else:
+    elif library_status == "active":
+        # The active library is the one you can actually play, so a row
+        # whose file is gone is left out of it. This exclusion deliberately
+        # does not apply when asking for archived or for everything: a
+        # missing file that was archived is exactly the row you would want
+        # to see when reviewing what you archived.
         where.append("file_status != 'missing'")
 
     where_clause = (" WHERE " + " AND ".join(where)) if where else ""
@@ -213,7 +227,8 @@ async def list_artists(search: str = Query("", max_length=100)):
     return await fetch_all("""
         SELECT COALESCE(NULLIF(primary_artist,''), artist) as name,
                COUNT(*) as track_count, MIN(id) as cover_id
-        FROM tracks WHERE file_status != 'missing'
+        FROM tracks
+        WHERE file_status != 'missing' AND library_status != 'archived'
         GROUP BY name ORDER BY name COLLATE NOCASE ASC
     """)
 
@@ -249,25 +264,266 @@ async def get_album_tracks(album_id: int):
     )
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 @router.get("/stats")
 async def library_stats():
     total = await fetch_one(
-        "SELECT COUNT(*) as c FROM tracks WHERE file_status != 'missing'"
+        "SELECT COUNT(*) as c FROM tracks "
+        "WHERE file_status != 'missing' AND library_status != 'archived'"
     )
     artists = await fetch_one(
         "SELECT COUNT(DISTINCT COALESCE(NULLIF(primary_artist,''), artist)) as c "
-        "FROM tracks WHERE file_status != 'missing'"
+        "FROM tracks "
+        "WHERE file_status != 'missing' AND library_status != 'archived'"
     )
     albums = await fetch_one(
         "SELECT COUNT(DISTINCT album) as c FROM tracks "
-        "WHERE album != '' AND file_status != 'missing'"
+        "WHERE album != '' AND file_status != 'missing' "
+        "AND library_status != 'archived'"
     )
     size = await fetch_one(
-        "SELECT COALESCE(SUM(file_size), 0) as c FROM tracks WHERE file_status != 'missing'"
+        "SELECT COALESCE(SUM(file_size), 0) as c FROM tracks "
+        "WHERE file_status != 'missing' AND library_status != 'archived'"
     )
     return {
         "total_tracks": total["c"] if total else 0,
         "total_artists": artists["c"] if artists else 0,
         "total_albums": albums["c"] if albums else 0,
         "total_size": size["c"] if size else 0,
+    }
+
+
+@router.get("/state")
+async def library_state():
+    """The counts line: All tracks / Available / Missing / Archived.
+
+    The three buckets partition the library - a track is active-and-present,
+    active-and-missing, or archived - so they always add up to the total.
+    Counting a missing file that also happens to be archived would let one
+    track appear twice and make the line lie by a few tracks, which is
+    worse than not showing the number at all.
+    """
+    row = await fetch_one(
+        """
+        SELECT
+            COUNT(*) as all_tracks,
+            SUM(CASE WHEN library_status = 'active'
+                      AND file_status = 'present' THEN 1 ELSE 0 END) as available,
+            SUM(CASE WHEN library_status = 'active'
+                      AND file_status = 'missing' THEN 1 ELSE 0 END) as missing,
+            SUM(CASE WHEN library_status = 'archived' THEN 1 ELSE 0 END) as archived
+        FROM tracks
+        """
+    )
+    return {
+        "all_tracks": row["all_tracks"] if row else 0,
+        "available": (row["available"] if row else 0) or 0,
+        "missing": (row["missing"] if row else 0) or 0,
+        "archived": (row["archived"] if row else 0) or 0,
+    }
+
+
+@router.get("/reconcile")
+async def reconcile(deep: bool = False):
+    """Classify every track: present / moved / missing / never acquired.
+
+    `deep=true` hashes every unclaimed file in the library to find moves by
+    content. That measured at ~10 seconds for 2.7 GB, so it is opt-in: the
+    cheap pass reports what it can and flags that moves were not checked,
+    rather than quietly reporting a moved file as missing.
+    """
+    return await reconcile_library(deep=deep, include_archived=True)
+
+
+@router.get("/tracks/{track_id}/provenance")
+async def track_provenance(track_id: int):
+    """Everything known about where this file came from.
+
+    `never_acquired` is a real answer, not a failure to load: it means the
+    acquisition table has no row for this track, which is exactly the
+    situation a rotated log line could never reveal.
+    """
+    track = await fetch_one(
+        "SELECT id, file_path, file_status, library_status, file_size "
+        "FROM tracks WHERE id = ?", (track_id,))
+    if not track:
+        raise HTTPException(404, "Track not found")
+
+    history = await fetch_all(
+        "SELECT * FROM acquisition WHERE track_id = ? ORDER BY id DESC",
+        (track_id,),
+    )
+    operations = await fetch_all(
+        "SELECT job_id, kind, state, source_url, final_path, error, created_at "
+        "FROM operations WHERE track_id = ? ORDER BY id DESC",
+        (track_id,),
+    )
+    return {
+        "track": track,
+        "acquisitions": history,
+        "operations": operations,
+        "never_acquired": not history,
+    }
+
+
+@router.post("/tracks/{track_id}/archive")
+async def archive_track(track_id: int, data: dict | None = None):
+    """Hide a track from active views. Keeps everything.
+
+    Deliberately does not touch the filesystem and does not delete the row.
+    The file stays where it is, the metadata and the acquisition history
+    stay readable, and `archived_reason` records why - which is what makes
+    the decision reviewable later instead of merely mysterious.
+    """
+    track = await fetch_one("SELECT id FROM tracks WHERE id = ?", (track_id,))
+    if not track:
+        raise HTTPException(404, "Track not found")
+
+    reason = str((data or {}).get("reason", ""))[:500]
+    await execute(
+        "UPDATE tracks SET library_status='archived', archived_at=?, "
+        "archived_reason=?, updated_at=? WHERE id=?",
+        (_now_iso(), reason, _now_iso(), track_id),
+    )
+    row = await fetch_one("SELECT * FROM tracks WHERE id = ?", (track_id,))
+    return {"status": "archived", "track": row}
+
+
+@router.post("/tracks/{track_id}/unarchive")
+async def unarchive_track(track_id: int):
+    """Restore an archived track. Always allowed, and always exact.
+
+    Nothing was moved or deleted to archive a track, so there is nothing to
+    undo and no state that can fail to come back - including when the file
+    is still missing, which is a legitimate thing for an archived record to
+    be. `file_status` is deliberately left alone rather than forced to
+    'present', because the file really is still gone.
+    """
+    track = await fetch_one("SELECT id FROM tracks WHERE id = ?", (track_id,))
+    if not track:
+        raise HTTPException(404, "Track not found")
+    await execute(
+        "UPDATE tracks SET library_status='active', archived_at=NULL, "
+        "archived_reason='', updated_at=? WHERE id=?",
+        (_now_iso(), track_id),
+    )
+    row = await fetch_one("SELECT * FROM tracks WHERE id = ?", (track_id,))
+    return {"status": "active", "track": row}
+
+
+@router.post("/tracks/{track_id}/locate")
+async def locate_track(track_id: int, data: dict):
+    """Point a missing track at the file that was found for it.
+
+    Only `tracks.file_path` changes. The acquisition row keeps the path the
+    file arrived at, so the pair (acquisition path, current path) is the
+    evidence that a move happened, and both survive the correction.
+    """
+    track = await fetch_one(
+        "SELECT id, file_path, file_status FROM tracks WHERE id = ?", (track_id,))
+    if not track:
+        raise HTTPException(404, "Track not found")
+
+    new_path = str((data or {}).get("path") or "").strip()
+    if not new_path:
+        raise HTTPException(400, "A path is required")
+
+    candidate = Path(new_path)
+    if not candidate.is_file():
+        raise HTTPException(400, f"Not a file: {new_path}")
+
+    # The path now names a real file, so it has to be a path this app is
+    # allowed to serve. Same rule as the audio route, for the same reason.
+    try:
+        resolved = candidate.resolve()
+        root = Path(config.get("library_path", "")).resolve()
+    except OSError:
+        raise HTTPException(400, "Path could not be resolved")
+    if not root.is_dir() or not resolved.is_relative_to(root):
+        raise HTTPException(403, "File is outside the configured library")
+
+    existing = await fetch_one(
+        "SELECT id FROM tracks WHERE file_path = ? AND id != ?",
+        (str(resolved), track_id),
+    )
+    if existing:
+        raise HTTPException(409, "Another track already points at that file")
+
+    try:
+        size = resolved.stat().st_size
+    except OSError:
+        size = 0
+    await execute(
+        "UPDATE tracks SET file_path=?, file_status='present', file_size=?, "
+        "updated_at=? WHERE id=?",
+        (str(resolved), size, _now_iso(), track_id),
+    )
+    row = await fetch_one("SELECT * FROM tracks WHERE id = ?", (track_id,))
+    return {
+        "status": "located",
+        "track": row,
+        "previous_path": track["file_path"],
+    }
+
+
+@router.post("/tracks/{track_id}/find")
+async def find_moved_track(track_id: int):
+    """Search the library for this track by content, not by name.
+
+    A name is not evidence - two different recordings share a title and an
+    artist field every day. SHA-256 is: an identical digest means the same
+    bytes. So this offers only exact matches and says so when there are
+    none, rather than offering the nearest thing and calling it a find.
+    """
+    track = await fetch_one(
+        "SELECT id, file_path FROM tracks WHERE id = ?", (track_id,))
+    if not track:
+        raise HTTPException(404, "Track not found")
+
+    acq = await acquisition.latest_for_track(track_id)
+    if not acq or not acq.get("sha256"):
+        return {
+            "status": "unknown",
+            "reason": "no recorded SHA-256 for this track, so its content "
+                      "cannot be identified; use Locate with a path instead",
+            "candidates": [],
+        }
+
+    claimed = {
+        str(Path(r["file_path"]).resolve()).casefold()
+        for r in await fetch_all("SELECT file_path FROM tracks")
+    }
+    root = Path(config.get("library_path") or "")
+
+    from ..services.tagger import AUDIO_EXTENSIONS
+
+    def _unclaimed() -> list[str]:
+        if not root.is_dir():
+            return []
+        out = []
+        for fp in root.rglob("*"):
+            if not fp.is_file() or fp.suffix.lower() not in AUDIO_EXTENSIONS:
+                continue
+            try:
+                key = str(fp.resolve()).casefold()
+            except OSError:
+                continue
+            if key not in claimed:
+                out.append(str(fp))
+        return out
+
+    candidates = await acquisition.hash_paths(await asyncio.to_thread(_unclaimed))
+    matches = acquisition.match_moved(
+        [{"track_id": track_id, "expected_path": track["file_path"],
+          "sha256": acq["sha256"]}],
+        candidates,
+    )
+    return {
+        "status": "found" if matches else "not_found",
+        "sha256": acq["sha256"],
+        "candidates": matches,
+        "hashed_files": sum(len(v) for v in candidates.values()),
     }

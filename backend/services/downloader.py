@@ -705,7 +705,7 @@ async def _process_job(job: dict):
 
         await _set_state(job_id, JobState.INDEXING, 97)
         await emit_job_update(job_id, "indexing", 97)
-        track_id = await _add_to_library(final_path, meta, source_url)
+        track_id = await _add_to_library(final_path, meta, source_url, job_id=job_id)
         await ops.advance(op_id, OpState.COMMITTED, track_id=track_id, error="")
         await _set_state(job_id, JobState.COMPLETE, 100)
         await emit_job_update(job_id, "complete", 100, output_path=final_path)
@@ -775,12 +775,17 @@ async def _process_job(job: dict):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def _add_to_library(file_path: str, meta: TrackMetadata, source_url: str) -> int:
+async def _add_to_library(file_path: str, meta: TrackMetadata, source_url: str,
+                          job_id: int | None = None) -> int:
     """Insert a newly downloaded track into the library. Returns the track id.
 
     Delegates to the operation journal's indexer so a file recovered by
     crash reconciliation is indexed through exactly the same path as a live
     one - same tags, same provenance, no second copy of the INSERT.
+
+    The job id travels with the call so the acquisition row records which
+    job produced the file. Without it, a file that later goes missing can
+    only be linked to a job by timestamp, which is a guess.
     """
     return await ops.index_file(
         file_path,
@@ -795,4 +800,5 @@ async def _add_to_library(file_path: str, meta: TrackMetadata, source_url: str) 
             "duration": meta.duration,
         },
         source_url,
+        job_id=job_id,
     )

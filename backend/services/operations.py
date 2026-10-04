@@ -233,11 +233,17 @@ async def owned_staged_paths() -> set[str]:
 # Library indexing (shared with the downloader)
 # ---------------------------------------------------------------------------
 
-async def index_file(file_path: str, metadata: dict, source_url: str = "") -> int:
+async def index_file(file_path: str, metadata: dict, source_url: str = "",
+                     job_id: int | None = None) -> int:
     """Insert a finished file into `tracks`. Returns the track id.
 
     Shared with the download pipeline so a crash-recovered file is indexed
     exactly like a live one - same tags, same provenance.
+
+    The upsert deliberately leaves `library_status` alone on conflict. A
+    re-index means the file is back, not that the user changed their mind
+    about archiving it, and quietly restoring an archived track would make
+    archive irreversible in exactly the case it exists to be reversible.
     """
     from ..pipeline.normalize import parse_artists
     from .tagger import read_tags
@@ -263,13 +269,41 @@ async def index_file(file_path: str, metadata: dict, source_url: str = "") -> in
         value = tags.get(field)
         return value if value not in (None, "") else fallback
 
-    cursor = await execute("""
-        INSERT OR REPLACE INTO tracks
+    # ON CONFLICT rather than INSERT OR REPLACE: REPLACE deletes the old row
+    # and inserts a new one, which changes the primary key and orphans every
+    # acquisition row pointing at it. `file_path` is UNIQUE, so the conflict
+    # target is unambiguous. `library_status`, `archived_at` and
+    # `archived_reason` are intentionally absent from the update list so an
+    # archived track stays archived across a re-index.
+    await execute("""
+        INSERT INTO tracks
         (file_path, title, artist, primary_artist, featured_artists, display_artist,
          album_artist, album, track_number, disc_number,
          year, genre, duration, file_size, format, bitrate, sample_rate,
          cover_art_path, source_url, source_type, file_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'present')
+        ON CONFLICT(file_path) DO UPDATE SET
+            title=excluded.title,
+            artist=excluded.artist,
+            primary_artist=excluded.primary_artist,
+            featured_artists=excluded.featured_artists,
+            display_artist=excluded.display_artist,
+            album_artist=excluded.album_artist,
+            album=excluded.album,
+            track_number=excluded.track_number,
+            disc_number=excluded.disc_number,
+            year=excluded.year,
+            genre=excluded.genre,
+            duration=excluded.duration,
+            file_size=excluded.file_size,
+            format=excluded.format,
+            bitrate=excluded.bitrate,
+            sample_rate=excluded.sample_rate,
+            cover_art_path=excluded.cover_art_path,
+            source_url=excluded.source_url,
+            source_type=excluded.source_type,
+            file_status='present',
+            updated_at=datetime('now')
     """, (
         file_path,
         pick("title", metadata.get("title", "")),
@@ -292,7 +326,27 @@ async def index_file(file_path: str, metadata: dict, source_url: str = "") -> in
         source_url,
         "download",
     ))
-    return cursor.lastrowid
+
+    row = await fetch_one(
+        "SELECT id FROM tracks WHERE file_path = ?", (file_path,))
+    track_id = row["id"] if row else 0
+
+    # Provenance is written here, at the one place every finished download
+    # passes through, so a later disappearance has something durable to be
+    # checked against. It happens after the row exists because acquisition
+    # references it.
+    from .acquisition import record as record_acquisition
+
+    source_name = source_url.split(":", 1)[0] if source_url else ""
+    await record_acquisition(
+        track_id=track_id,
+        file_path=file_path,
+        job_id=job_id,
+        source=source_name,
+        source_url=source_url,
+        file_size=file_size,
+    )
+    return track_id
 
 
 async def _already_indexed(file_path: str) -> dict | None:
