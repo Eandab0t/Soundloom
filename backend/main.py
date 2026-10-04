@@ -86,6 +86,17 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup reconciliation failed, continuing: %s", e)
     await reclaim_orphans()
 
+    # A provenance run left 'running' means the process died mid-sweep.
+    # Relabel it so the panel offers an honest Resume instead of claiming
+    # a task is in flight when nothing is. Independent of the filesystem
+    # check below, and deliberately not an auto-resume: that would
+    # silently restart gigabytes of hashing nobody asked for a second time.
+    try:
+        from backend.services import backfill as _backfill
+        await _backfill.mark_interrupted()
+    except Exception as be:
+        logger.warning("Could not reconcile backfill run state: %s", be)
+
     # Bring the library rows back in line with the disk before anything reads
     # them. This has to happen *before* the Needs Attention snapshot below, or
     # that snapshot would be taken against a library that still claims files
@@ -136,6 +147,19 @@ async def lifespan(app: FastAPI):
     await stop_sync_loop()
     await stop_watcher()
     await stop_worker()
+    # Stop any hashing sweep before the connection closes, or it
+    # writes into a dead database on the way out.
+    try:
+        from backend.services import backfill as _bf
+        await _bf.shutdown()
+    except Exception as se:
+        logger.warning("Could not stop backfill cleanly: %s", se)
+    try:
+        from backend.services import content_index as _ci
+        await _ci.shutdown()
+    except Exception as ce:
+        logger.warning("Could not stop content index cleanly: %s", ce)
+
     await close_db()
     logger.info("Soundloom shut down")
 

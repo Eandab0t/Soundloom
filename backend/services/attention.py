@@ -206,6 +206,60 @@ async def get_item(item_id: int) -> dict | None:
         "SELECT * FROM attention_items WHERE id=?", (item_id,)))
 
 
+
+async def attach_provenance(items: list) -> list:
+    """Add a compact provenance summary to items that reference a track.
+
+    An item naming a track can send the user straight there, but until now
+    that screen said nothing about where the file came from - which is
+    usually the question behind the item. One query for all of them rather
+    than one per item, and only the latest acquisition: this list is
+    items worst-first, and a full audit trail on every row would make it
+    unreadable. The full record stays where it belongs, on the track.
+
+    An item whose track has no provenance gets {"known": false} rather than
+    a missing key, so the frontend can tell "no record" from "not asked".
+    """
+    track_ids = [i.get("entity_id") for i in items
+                 if isinstance(i, dict)
+                 and i.get("entity_type") == "track"
+                 and i.get("entity_id")]
+    if not track_ids:
+        return items
+
+    placeholders = ",".join("?" * len(track_ids))
+    rows = await fetch_all(
+        f"""
+        SELECT a.track_id, a.sha256, a.file_size, a.completed_at,
+               a.source, a.source_url, a.job_id, a.organizer_result
+          FROM acquisition a
+         WHERE a.track_id IN ({placeholders})
+           AND a.id = (SELECT MAX(b.id) FROM acquisition b
+                        WHERE b.track_id = a.track_id)
+        """,
+        tuple(track_ids),
+    )
+    by_track = {r["track_id"]: dict(r) for r in rows}
+    for item in items:
+        if not isinstance(item, dict) or item.get("entity_type") != "track":
+            continue
+        rec = by_track.get(item.get("entity_id"))
+        if rec is None:
+            item["provenance"] = {"known": False}
+            continue
+        item["provenance"] = {
+            "known": bool(rec["sha256"]),
+            "sha256": rec["sha256"] or "",
+            "file_size": rec["file_size"] or 0,
+            "completed_at": rec["completed_at"] or "",
+            "source": rec["source"] or "",
+            "source_url": rec["source_url"] or "",
+            "job_id": rec["job_id"],
+            "from_backfill": rec["organizer_result"] == "backfill",
+        }
+    return items
+
+
 async def list_items(status: str = AttentionStatus.OPEN.value,
                      type: str | None = None,
                      severity: str | None = None,
@@ -230,7 +284,8 @@ async def list_items(status: str = AttentionStatus.OPEN.value,
             " LIMIT ? OFFSET ?")
     params.extend([limit, offset])
 
-    return [_decode(r) for r in await fetch_all(sql, tuple(params))]
+    items = [_decode(r) for r in await fetch_all(sql, tuple(params))]
+    return await attach_provenance(items)
 
 
 async def counts_by_type(status: str = AttentionStatus.OPEN.value) -> dict:

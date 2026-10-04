@@ -273,6 +273,70 @@ MIGRATIONS: list[Migration] = [
         CREATE INDEX IF NOT EXISTS idx_acquisition_job ON acquisition(job_id);
         """,
     ),
+    Migration(
+        version=12,
+        name="provenance_backfill",
+        # Progress for the SHA-256 backfill, persisted rather than held in
+        # memory so an interrupted run is resumable and the history of runs
+        # is an audit trail.
+        #
+        # One row per run. `status` moves running -> (paused | cancelled |
+        # interrupted | failed | complete); a run left in 'running' at
+        # startup means the process died, because nothing else leaves it
+        # there, so startup marks it 'interrupted' rather than silently
+        # restarting 2.7 GB of hashing nobody asked for again.
+        #
+        # `bytes_total` / `bytes_processed` are here because the honest
+        # progress measure for a hashing job is bytes, not files: 800
+        # one-megabyte tracks and 800 forty-megabyte ones are the same
+        # "800 files" and nowhere near the same work.
+        sql="""
+        CREATE TABLE IF NOT EXISTS provenance_backfill (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT NOT NULL DEFAULT 'running',
+            started_at TEXT,
+            completed_at TEXT,
+            total_files INTEGER NOT NULL DEFAULT 0,
+            processed_files INTEGER NOT NULL DEFAULT 0,
+            bytes_total INTEGER NOT NULL DEFAULT 0,
+            bytes_processed INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            last_track_id INTEGER NOT NULL DEFAULT 0,
+            last_path TEXT DEFAULT '',
+            error TEXT DEFAULT '',
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_provenance_backfill_status
+            ON provenance_backfill(status);
+        """,
+    ),
+
+    Migration(
+        version=13,
+        name="library_content_index",
+        # Cached digests for library files that no track row claims.
+        #
+        # A move can only be proven by comparing a missing track's own
+        # SHA-256 against the rest of the library, and that comparison
+        # needs the other side hashed. Hashing the unclaimed files costs
+        # ~4 seconds for 831 files - fine once, wasteful per page load -
+        # so the results live here and every later lookup is a join.
+        #
+        # UNIQUE on file_path so a rebuild replaces rows instead of
+        # accumulating stale digests for files that have since been
+        # claimed, moved or deleted.
+        sql="""
+        CREATE TABLE IF NOT EXISTS library_content (
+            digest TEXT NOT NULL,
+            file_path TEXT NOT NULL UNIQUE,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            indexed_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_library_content_digest
+            ON library_content(digest);
+        """,
+    ),
+
 ]
 
 

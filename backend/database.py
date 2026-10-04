@@ -96,6 +96,29 @@ CREATE TABLE IF NOT EXISTS acquisition (
     organizer_result TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS library_content (
+    digest TEXT NOT NULL,
+    file_path TEXT NOT NULL UNIQUE,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    indexed_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS provenance_backfill (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'running',
+    started_at TEXT,
+    completed_at TEXT,
+    total_files INTEGER NOT NULL DEFAULT 0,
+    processed_files INTEGER NOT NULL DEFAULT 0,
+    bytes_total INTEGER NOT NULL DEFAULT 0,
+    bytes_processed INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    last_track_id INTEGER NOT NULL DEFAULT 0,
+    last_path TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS synced_playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -173,6 +196,25 @@ async def execute(sql: str, params: tuple = ()) -> aiosqlite.Cursor:
             cursor = await db.execute(sql, params)
             await db.commit()
             return cursor
+
+
+async def executemany(sql: str, rows: list[tuple]) -> None:
+    """Run one statement across many parameter sets, committing once.
+
+    `execute` binds a single flat parameter tuple, so a batch has to go
+    through here rather than being passed a list - which raises a binding
+    error at runtime rather than at import. One commit for the whole batch
+    matters for the content index, which writes dozens of rows per chunk.
+
+    An empty list is a no-op, because sqlite3 rejects a zero-row
+    executemany outright.
+    """
+    if not rows:
+        return
+    async with _db_lock:
+        async with get_db() as db:
+            await db.executemany(sql, rows)
+            await db.commit()
 
 
 async def fetch_all(sql: str, params: tuple = ()) -> list[dict]:

@@ -85,7 +85,12 @@ class TestLibraryStateMigration:
         import sqlite3
 
         from backend.migrations import MIGRATIONS
-        assert MIGRATIONS[-1].name == "library_state_and_acquisition"
+        # Look the migration up by version, not by position: asserting it
+        # is the newest one breaks every time a later migration lands, and
+        # says nothing about whether *this* change actually applies.
+        by_version = {m.version: m.name for m in MIGRATIONS}
+        assert by_version[11] == "library_state_and_acquisition"
+        assert len(by_version) == len(MIGRATIONS), "duplicate migration versions"
 
         # Build a pre-migration database the way an upgrade would find it.
         legacy = sqlite3.connect(str(env.parent / "legacy.db"))

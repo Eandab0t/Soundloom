@@ -11,7 +11,7 @@ from pathlib import Path
 from .. import config
 from ..database import fetch_all, fetch_one, execute
 from ..services.scanner import scan_folder, get_scan_status, reconcile_library
-from ..services import acquisition
+from ..services import acquisition, backfill, content_index
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -467,6 +467,65 @@ async def locate_track(track_id: int, data: dict):
         "track": row,
         "previous_path": track["file_path"],
     }
+
+
+@router.get("/moves")
+async def moved_suggestions():
+    """Missing tracks whose exact content is indexed elsewhere.
+
+    Every row here is proof, not a lead: only an identical SHA-256 can
+    match. A missing track with no recorded hash cannot match and is
+    absent from the result - which is the honest outcome for the whole
+    pre-backfill library, and the reason the Missing screen also keeps a
+    manual Locate.
+    """
+    return {"moves": await content_index.find_moves()}
+
+
+@router.get("/content-index")
+async def content_index_state():
+    return await content_index.status()
+
+
+@router.post("/content-index/rebuild")
+async def content_index_rebuild():
+    return await content_index.rebuild()
+
+
+@router.get("/provenance/backfill")
+async def backfill_state():
+    """What a backfill would cost, and how the last one went.
+
+    Split deliberately: `pending` is knowable without running anything,
+    so the panel can say "766 files, 2.7 GB" before the user commits,
+    rather than after.
+    """
+    return {
+        "pending": await backfill.pending(),
+        "run": await backfill.status(),
+        "history": await backfill.history(),
+    }
+
+
+@router.post("/provenance/backfill/start")
+async def backfill_start(resume: bool = False):
+    """Start, or continue, hashing the library. Returns at once."""
+    return await backfill.start(resume=resume)
+
+
+@router.post("/provenance/backfill/pause")
+async def backfill_pause():
+    return await backfill.pause()
+
+
+@router.post("/provenance/backfill/resume")
+async def backfill_resume():
+    return await backfill.resume()
+
+
+@router.post("/provenance/backfill/cancel")
+async def backfill_cancel():
+    return await backfill.cancel()
 
 
 @router.post("/tracks/{track_id}/find")
