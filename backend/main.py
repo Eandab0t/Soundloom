@@ -71,6 +71,30 @@ async def lifespan(app: FastAPI):
     from backend.services.watcher import start_watcher, stop_watcher
     from backend.services.sync import start_sync_loop, stop_sync_loop
     await reclaim_orphans()
+
+    # Bring the library rows back in line with the disk before anything reads
+    # them. This has to happen *before* the Needs Attention snapshot below, or
+    # that snapshot would be taken against a library that still claims files
+    # exist when they do not - and the counts on screen would be wrong until
+    # the next refresh.
+    if config.get("verify_library_on_startup", True):
+        try:
+            from backend.services.scanner import verify_filesystem
+            verified = await verify_filesystem()
+            if verified.get("status") == "complete" and (
+                verified.get("marked_missing") or verified.get("restored_present")
+            ):
+                logger.info(
+                    "Startup library verify: %s",
+                    {k: v for k, v in verified.items() if k != "reason"},
+                )
+            elif verified.get("status") == "skipped":
+                logger.info("Startup library verify skipped: %s", verified.get("reason"))
+        except Exception as e:
+            # A verification bug must never stop the app from starting, and
+            # must never be the reason a library looks empty.
+            logger.exception("Startup library verify failed, continuing: %s", e)
+
     await start_worker()
     max_dl = config.get("max_concurrent_downloads", 1)
     set_concurrency(max_dl)

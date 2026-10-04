@@ -50,6 +50,13 @@ DEFAULTS = {
     "spotify_client_secret": "",
     "tag_case_mode": "off",
     "backup_before_write": True,
+    # At startup, mark track rows whose file is no longer on disk as
+    # missing (and restore rows whose file came back). Existence check
+    # only - no tag reading - and it refuses to run at all when the
+    # library folder is unavailable, so an unmounted drive cannot blank
+    # the library. Turn off for a library on storage that is often
+    # offline.
+    "verify_library_on_startup": True,
     "backup_format": "json",
     # --- Playlist sync (Soundiiz-style) ---
     "sync_enabled": True,

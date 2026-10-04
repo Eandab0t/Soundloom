@@ -59,6 +59,102 @@ async def scan_folder(folder_path: str | None = None) -> dict:
     return result
 
 
+# SQLite's default bound-parameter ceiling is 999; stay well under it so a
+# large library cannot fail the whole statement on one huge chunk.
+_VERIFY_CHUNK = 400
+
+
+async def verify_filesystem() -> dict:
+    """Reconcile track rows against what is actually on disk, cheaply.
+
+    Existence only: no mutagen, no tag reads. A full `_scan_and_reconcile`
+    opens and parses every file, which is the right thing when the user asked
+    for a rescan and the wrong thing at startup - all this needs to know is
+    whether each path is still there, and on a library of any size the tag
+    parsing is where the seconds go.
+
+    Two rules make this safe to run unattended:
+
+    **An unavailable library root marks nothing.** If `library_path` is unset,
+    or the folder is not there (an unmounted drive, a network share that did
+    not come up), every path is absent and a naive check would empty the entire
+    library on a technicality. The check refuses to conclude anything it cannot
+    distinguish from "the disk is not mounted".
+
+    **Both directions are reconciled.** A file that came back is put back to
+    `present`. Without this, marking missing is a one-way ratchet: a library on
+    a removable or network drive would go permanently blank after one bad
+    morning, with no way back except a full rescan.
+    """
+    folder = config.get("library_path")
+    if not folder:
+        return {"status": "skipped", "reason": "no library_path configured",
+                "marked_missing": 0, "restored_present": 0, "checked": 0}
+
+    root = Path(folder)
+    if not root.exists() or not root.is_dir():
+        # Deliberately does not touch a single row. See the docstring.
+        logger.warning(
+            "Startup verify skipped: library root %s is not available. "
+            "Marking every track missing here would hide a library that is "
+            "probably still there.", folder
+        )
+        return {"status": "skipped", "reason": f"library root unavailable: {folder}",
+                "marked_missing": 0, "restored_present": 0, "checked": 0}
+
+    rows = await fetch_all(
+        "SELECT id, file_path, file_status FROM tracks WHERE file_path != ''"
+    )
+    if not rows:
+        return {"status": "complete", "marked_missing": 0, "restored_present": 0,
+                "checked": 0, "reason": "library is empty"}
+
+    # Stat calls are blocking syscalls. On a slow or network-backed volume
+    # 800+ of them would stall the event loop, and startup is exactly when the
+    # server is trying to become responsive.
+    def _probe() -> tuple[list[int], list[int]]:
+        gone: list[int] = []
+        back: list[int] = []
+        for row in rows:
+            present = Path(row["file_path"]).is_file()
+            if present:
+                if row["file_status"] != "present":
+                    back.append(row["id"])
+            elif row["file_status"] != "missing":
+                gone.append(row["id"])
+        return gone, back
+
+    gone, back = await asyncio.to_thread(_probe)
+
+    now = _utcnow_iso()
+    for ids, status in ((gone, "missing"), (back, "present")):
+        for i in range(0, len(ids), _VERIFY_CHUNK):
+            chunk = ids[i:i + _VERIFY_CHUNK]
+            placeholders = ",".join("?" * len(chunk))
+            await execute(
+                f"UPDATE tracks SET file_status=?, updated_at=? WHERE id IN ({placeholders})",
+                tuple([status, now] + chunk),
+            )
+
+    result = {"status": "complete", "checked": len(rows),
+              "marked_missing": len(gone), "restored_present": len(back)}
+    if gone or back:
+        logger.info(
+            "Startup verify: %d file(s) missing, %d restored, of %d checked",
+            len(gone), len(back), len(rows),
+        )
+    # A whole library disappearing at once is almost always the volume, not the
+    # user. Say so loudly rather than letting it read as 800 separate deletions.
+    if rows and len(gone) > len(rows) / 2:
+        logger.warning(
+            "%d of %d track files were not found under %s. That is most of "
+            "the library - check that the drive is mounted and that "
+            "library_path still points at it before treating these as deleted.",
+            len(gone), len(rows), folder,
+        )
+    return result
+
+
 async def _scan_and_reconcile(folder: str) -> int:
     """Scan folder and reconcile with database. Returns total files found."""
     audio_files = []
