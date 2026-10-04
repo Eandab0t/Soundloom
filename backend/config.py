@@ -15,6 +15,8 @@ else:
     ROOT = Path(__file__).resolve().parent.parent
     _BUNDLE = ROOT
 
+APP_VERSION = "0.2.2"
+
 DATA_DIR = ROOT / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 DB_PATH = DATA_DIR / "library.db"

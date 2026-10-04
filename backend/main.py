@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
     logger.info("Soundloom shut down")
 
 
-app = FastAPI(title="Soundloom", version="0.2.2", lifespan=lifespan)
+app = FastAPI(title="Soundloom", version=config.APP_VERSION, lifespan=lifespan)
 
 
 @app.exception_handler(VividlyError)

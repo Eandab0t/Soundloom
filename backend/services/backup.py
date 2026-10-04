@@ -37,6 +37,108 @@ def _timestamp() -> str:
     return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
+# --- Database backups -------------------------------------------------------
+# Tag backups are tiny and only exist while a write is in flight. A schema
+# migration rewrites table structure, so the thing worth protecting first is
+# the whole library.db file. These are binary copies kept under backups/db/.
+
+DB_BACKUP_DIR = BACKUP_DIR / "db"
+# Keep the most recent pre-migration copies; older ones are pruned so a
+# long-lived install does not accumulate full copies of the library.
+DB_BACKUP_KEEP = 5
+
+
+def db_backup_path(directory: Optional[Path] = None) -> Path:
+    """A unique path for a DB snapshot.
+
+    Several backups can legitimately be taken within one second (tests, a
+    retry loop, a fast migration), so the seconds-only timestamp is made
+    unique with a counter suffix rather than silently overwriting an earlier
+    snapshot.
+    """
+    base = Path(directory) if directory else DB_BACKUP_DIR
+    stamp = _timestamp()
+    path = base / f"library_{stamp}.db"
+    n = 1
+    while path.exists():
+        path = base / f"library_{stamp}-{n}.db"
+        n += 1
+    return path
+
+
+def backup_database(db_path: str | Path, directory: Optional[Path] = None) -> str:
+    """Copy the SQLite file so a failed migration can be rolled back.
+
+    Uses SQLite's own backup API rather than shutil.copy: it is safe to call
+    on a WAL database while other connections exist, and it produces a
+    consistent snapshot instead of a torn file.
+
+    Returns the path written, or "" when there is no database yet (a brand
+    new install has nothing to protect).
+    """
+    src = Path(db_path)
+    if not src.exists() or src.stat().st_size == 0:
+        return ""
+
+    path = db_backup_path(directory)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        import sqlite3
+
+        # NB: a `with sqlite3.connect(...)` block commits but does NOT close,
+        # and on Windows an open handle blocks deletion - which would make
+        # pruning silently fail forever. Close explicitly.
+        source = sqlite3.connect(str(src))
+        dest = sqlite3.connect(str(path))
+        try:
+            source.backup(dest)
+        finally:
+            dest.close()
+            source.close()
+    except Exception as exc:
+        # A missing backup must never stop the app from starting; log and
+        # let the migration proceed.
+        logger.warning("Could not back up %s before migration: %s", src.name, exc)
+        return ""
+
+    prune_db_backups(directory)
+    return str(path)
+
+
+def list_db_backups(directory: Optional[Path] = None) -> list[dict]:
+    """Newest-first metadata for each stored database backup."""
+    base = Path(directory) if directory else DB_BACKUP_DIR
+    if not base.exists():
+        return []
+    out = []
+    for p in sorted(base.glob("library_*.db"), key=lambda f: f.stat().st_mtime,
+                    reverse=True):
+        stat = p.stat()
+        out.append({
+            "path": str(p),
+            "name": p.name,
+            "size": stat.st_size,
+            "modified": datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+        })
+    return out
+
+
+def prune_db_backups(directory: Optional[Path] = None, keep: int = DB_BACKUP_KEEP) -> int:
+    """Delete all but the `keep` newest database backups. Returns removed."""
+    backups = list_db_backups(directory)
+    removed = 0
+    for entry in backups[keep:]:
+        try:
+            Path(entry["path"]).unlink()
+            removed += 1
+        except OSError as exc:
+            logger.warning("Could not prune old DB backup %s: %s", entry["name"], exc)
+        except Exception as exc:
+            logger.warning("Could not prune old DB backup %s: %s", entry["name"], exc)
+    return removed
+
+
 def backup_path(fmt: str = "json", directory: Optional[Path] = None) -> Path:
     base = Path(directory) if directory else BACKUP_DIR
     return base / f"tags_backup_{_timestamp()}.{fmt}"

@@ -33,7 +33,7 @@ async def get_logs():
 @router.get("/api/status")
 async def system_status():
     return {
-        "version": "0.2.1",
+        "version": config.APP_VERSION,
         "name": "Soundloom",
         "library_path": config.get("library_path"),
         "download_path": config.get("download_path"),
