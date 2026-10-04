@@ -4,6 +4,7 @@
 import { API, State, Bus, debounce } from './core.js';
 import { Library, switchToTab } from './tabs/library.js';
 import { Queue } from './tabs/queue.js';
+import { Attention } from './tabs/attention.js';
 import { Sync } from './tabs/sync.js';
 import { Playlists } from './tabs/playlists.js';
 import { Watch } from './tabs/watch.js';
@@ -40,6 +41,10 @@ const App = {
     Queue.updateBadge();
     Queue.startPolling();
     setInterval(() => Queue.updateBadge(), 10000);
+    // The badge has to be right on first paint, so it is fetched at startup
+    // rather than only when the tab is opened.
+    Attention.updateBadge();
+    setInterval(() => Attention.updateBadge(), 20000);
   },
 
   startHeartbeat() {
@@ -67,6 +72,7 @@ const App = {
         if (tab === 'queue') { Queue.load(); Queue.startPolling(); }
         else { Queue.stopPolling(); }
         if (tab === 'library') Library.loadTracks();
+        if (tab === 'attention') { Attention.load(); Attention.updateBadge(); }
         if (tab === 'sync') Sync.load();
         if (tab === 'playlists') Playlists.load();
         if (tab === 'watch') Watch.load();
@@ -82,6 +88,10 @@ const App = {
     Bus.on('job_update', (d) => {
       if (State.get('currentTab') === 'queue') Queue.load();
       Queue.updateBadge();
+      // A failed job may be a blocked download waiting on the user, so the
+      // Needs Attention badge is re-counted on the event instead of only on
+      // a timer.
+      if (d.status === 'failed') Attention.updateBadge();
       if (d.status === 'complete') {
         Library.loadStats();
         if (State.get('currentTab') === 'library') Library.loadTracks();
@@ -150,6 +160,6 @@ const App = {
 
 // Expose the modules the inline HTML onclick handlers reference.
 // (AddSource and Logs were missing before — their buttons silently threw.)
-Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Shortcuts });
+Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Attention, Shortcuts });
 
 document.addEventListener('DOMContentLoaded', () => App.init());

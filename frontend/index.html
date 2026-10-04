@@ -43,6 +43,11 @@
           <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
           <span>Add Music</span>
         </a>
+        <a href="#attention" class="nav-item" data-tab="attention">
+          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <span>Needs Attention</span>
+          <span class="badge" id="attention-badge" style="display:none">0</span>
+        </a>
         <a href="#queue" class="nav-item" data-tab="queue">
           <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v14"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
           <span>Queue</span>
@@ -306,6 +311,24 @@
             <button class="seg-btn" data-tab="failed" onclick="Queue.switchTab('failed')">Failed</button>
           </div>
           <div id="queue-list"></div>
+        </section>
+
+        <!-- ======== NEEDS ATTENTION ======== -->
+        <section id="tab-attention" class="tab-panel">
+          <div class="panel-head">
+            <div>
+              <h1>Needs Attention</h1>
+              <p class="panel-sub" id="attention-summary">Loading&hellip;</p>
+            </div>
+            <div class="input-row">
+              <button class="btn ghost sm" onclick="Attention.refresh()">Rescan</button>
+            </div>
+          </div>
+          <div class="seg" role="tablist">
+            <button class="seg-btn active" data-att-filter="open" onclick="Attention.setFilter('open')">Open</button>
+            <button class="seg-btn" data-att-filter="all" onclick="Attention.setFilter('all')">History</button>
+          </div>
+          <div id="attention-list"></div>
         </section>
 
         <!-- ======== IDENTIFY ======== -->

@@ -36,6 +36,9 @@ DEFAULTS = {
     "max_concurrent_downloads": 3,
     "max_retries": 3,
     "match_threshold": 70,
+    # Recovering a file that already reached the library always happens.
+    # Re-downloading an interrupted track costs bandwidth, so it is opt-in.
+    "auto_resume_operations": False,
     "watch_enabled": True,
     "watched_check_interval": 3600,
     "watch_backfill_days": 30,

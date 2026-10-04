@@ -131,6 +131,103 @@ MIGRATIONS: list[Migration] = [
         CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
         """,
     ),
+    Migration(
+        version=8,
+        name="operations_journal",
+        sql="""
+        CREATE TABLE IF NOT EXISTS operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_key TEXT UNIQUE,
+            job_id INTEGER,
+            kind TEXT DEFAULT 'download',
+            state TEXT DEFAULT 'queued',
+            title TEXT DEFAULT '',
+            artist TEXT DEFAULT '',
+            album TEXT DEFAULT '',
+            album_artist TEXT DEFAULT '',
+            track_number INTEGER DEFAULT 0,
+            source_url TEXT DEFAULT '',
+            staged_path TEXT DEFAULT '',
+            final_path TEXT DEFAULT '',
+            track_id INTEGER,
+            error TEXT DEFAULT '',
+            attempt INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_operations_state ON operations(state);
+        CREATE INDEX IF NOT EXISTS idx_operations_job ON operations(job_id);
+        """,
+    ),
+    Migration(
+        version=9,
+        name="attention_items",
+        sql="""
+        CREATE TABLE IF NOT EXISTS attention_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dedupe_key TEXT NOT NULL UNIQUE,
+            type TEXT NOT NULL DEFAULT 'generic',
+            severity TEXT NOT NULL DEFAULT 'medium',
+            title TEXT NOT NULL DEFAULT '',
+            description TEXT DEFAULT '',
+            entity_type TEXT DEFAULT '',
+            entity_id INTEGER,
+            source TEXT DEFAULT '',
+            action TEXT DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'open',
+            seen_count INTEGER NOT NULL DEFAULT 1,
+            resolved_note TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_attention_status ON attention_items(status);
+        CREATE INDEX IF NOT EXISTS idx_attention_type ON attention_items(type);
+        CREATE INDEX IF NOT EXISTS idx_attention_source ON attention_items(source);
+        """,
+    ),
+    Migration(
+        version=10,
+        name="interactive_match_decisions",
+        # A blocked download has to be decidable *from the screen that
+        # reported it*, not by editing a job row in a SQL console. These two
+        # columns are that decision's memory on the job itself:
+        #
+        #   match_block    JSON describing the last rejected candidate, so a
+        #                  producer can explain "wanted X, got Y" without
+        #                   re-resolving the source (which may 404 by now).
+        #   match_override one-shot 'accept', consumed the moment the gate
+        #                  honours it. A persistent flag would silently
+        #                  bypass every *future* attempt on this job too.
+        #
+        # match_decisions is the audit trail. The attention_items row records
+        # that something was decided; this records what was decided, with the
+        # score and threshold that were overridden, and it outlives the job -
+        # "clear failed" deletes job rows, and the user's decision to accept a
+        # 58% match is exactly the kind of thing that must not vanish.
+        sql="""
+        ALTER TABLE jobs ADD COLUMN match_block TEXT DEFAULT '';
+        ALTER TABLE jobs ADD COLUMN match_override TEXT DEFAULT '';
+        CREATE TABLE IF NOT EXISTS match_decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            attention_item_id INTEGER,
+            decision TEXT NOT NULL DEFAULT '',
+            wanted_artist TEXT DEFAULT '',
+            wanted_title TEXT DEFAULT '',
+            candidate_artist TEXT DEFAULT '',
+            candidate_title TEXT DEFAULT '',
+            score REAL DEFAULT 0,
+            threshold REAL DEFAULT 0,
+            note TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_match_decisions_job
+            ON match_decisions(job_id);
+        CREATE INDEX IF NOT EXISTS idx_match_decisions_created
+            ON match_decisions(created_at DESC);
+        """,
+    ),
 ]
 
 
@@ -154,10 +251,14 @@ async def run_migrations(db) -> int:
     if pending:
         # Snapshot the library before touching schema. If a migration fails
         # halfway, this file is the way back.
-        from .services.backup import backup_database
         from . import config as _config
 
-        backed_up = backup_database(_config.DB_PATH)
+        # Resolve the destination from the backup module at call time instead
+        # of letting backup_database fall back to its import-time constant, so
+        # a caller that redirects backup_svc.DB_BACKUP_DIR (tests, portable
+        # installs) gets its snapshot written where it asked.
+        from .services import backup as _backup
+        backed_up = _backup.backup_database(_config.DB_PATH, _backup.DB_BACKUP_DIR)
         if backed_up:
             logger.info("Database backed up before migration: %s", backed_up)
 

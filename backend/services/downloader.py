@@ -31,8 +31,9 @@ from ..pipeline.models import (
     JobState, TrackMetadata, SourceCandidate, SourceType,
     QualityProfile, QUALITY_PRESETS,
 )
-from ..pipeline.matcher import score_candidate, confidence_level
-from ..pipeline.normalize import parse_artists
+from ..pipeline.matcher import (
+    score_candidate, confidence_level, has_comparable_intent,
+)
 from ..pipeline.editor import apply_metadata_to_file
 from ..pipeline.cleanup import run_cleanup
 from ..sources.ytdlp_source import YtdlpResolver, YtdlpDownloader, detect_source
@@ -40,7 +41,10 @@ from ..sources.deezer_source import DeezerResolver, DeezerDownloader, is_deezer_
 from . import source_registry
 from ..services.converter import convert
 from ..services.organizer import organize_file
-from ..services.tagger import write_tags, read_tags
+from ..services.tagger import write_tags
+from ..services import operations as ops
+from ..services import match_decisions
+from ..services.operations import OpState
 
 logger = logging.getLogger(__name__)
 
@@ -129,16 +133,50 @@ async def reclaim_orphans() -> int:
     """Clean temp dirs left behind by a crash mid-pipeline.
 
     Downloads are staged under data/tmp/<job-uuid>/ and converted under
-    data/tmp/converted/. Anything left there from a previous run that no live
-    job owns is deleted. Returns number of files removed. Safe to call at
-    every startup.
+    data/tmp/converted/. Anything left there that no live operation still owns
+    is deleted. Returns number of files removed. Safe to call at every startup.
+
+    Ownership matters: a converted file that survived a crash is resumable, so
+    reconcile() runs first and only then does this sweep claim the leftovers.
+    Deleting first would throw away work the journal can still finish.
     """
     tmp_root = Path(config.ROOT) / "data" / "tmp"
     if not tmp_root.exists():
         return 0
+
+    owned: set[str] = set()
+    try:
+        owned = await ops.owned_staged_paths()
+    except Exception as e:
+        # Never sweep blind on a journal error - deleting is irreversible.
+        logger.warning("Could not read operation ownership; skipping temp sweep: %s", e)
+        return 0
+
+    def _is_owned(entry: Path) -> bool:
+        """True if this entry is, or contains, a staged artifact in use.
+
+        Staged files live inside per-job temp directories
+        (data/tmp/<job-uuid>/downloads/...), so the sweep walks parent
+        directories while the journal records the file underneath. Ownership
+        therefore has to be tested by ancestry, not equality - otherwise the
+        sweep deletes the directory out from under a resumable download.
+        """
+        try:
+            resolved = entry.resolve()
+        except OSError:
+            return False
+        for path in owned:
+            candidate = Path(path)
+            if candidate == resolved or candidate.is_relative_to(resolved):
+                return True
+        return False
+
     removed = 0
     for entry in tmp_root.iterdir():
         try:
+            if _is_owned(entry):
+                logger.info("Keeping temp entry owned by a live operation: %s", entry)
+                continue
             if entry.is_dir():
                 shutil.rmtree(entry, ignore_errors=True)
                 removed += 1
@@ -265,6 +303,12 @@ async def _set_state(job_id: int, state: JobState, progress: float = None):
     set_parts = [f"{k}=?" for k in updates]
     values = list(updates.values()) + [job_id]
     await execute(f"UPDATE jobs SET {', '.join(set_parts)} WHERE id=?", tuple(values))
+    if state == JobState.FAILED:
+        # Every failure path ends here, so this is the one place that can be
+        # sure no attempt is still in flight. An accept that reached this point
+        # unspent never got as far as the match check, and must not outlive the
+        # job it was attached to.
+        await match_decisions.clear_override(job_id)
 
 
 async def _update_job(job_id: int, **kwargs):
@@ -292,12 +336,71 @@ def _job_tmp_dir(job_id: int) -> Path:
     return d
 
 
-async def _fallback_url_for(job: dict, failed_url: str, settings: dict) -> str | None:
+def _search_payload(source_url: str) -> str:
+    """The 'artist title' query packed into a search-scheme job URL.
+
+    Empty for direct URLs - there is no request encoded in those, which is
+    exactly why a bare URL download has nothing to be matched against.
+    """
+    if not source_registry.is_search_job_url(source_url):
+        return ""
+    from urllib.parse import unquote
+    import re as _re
+    payload = source_url.split(":", 1)[1] if ":" in source_url else ""
+    return unquote(_re.sub(r"^[a-z]+search\d*:", "", payload, flags=_re.I)).strip()
+
+
+def _job_intent(job: dict, source_url: str = "") -> TrackMetadata:
+    """What the user asked for, as opposed to what a source reported.
+
+    The matcher is only worth anything when its two arguments are different
+    things: the request on one side, the source on the other. Every caller
+    that reaches here must therefore read the request *before* resolving.
+
+    Sources of intent, in order of authority:
+
+    1. `title`/`artist`/`album`/`album_artist`/`year` on the job row - what the
+       watcher, playlist import and sync put there when the user named a track.
+    2. `query` - what the user typed into the queue box.
+    3. the payload of a search-scheme URL - 'artist title' built by
+       `source_registry.build_search_job_url`.
+
+    None of these is ever overwritten by the resolve step, so intent survives
+    retries and source fallback.
+    """
+    intent = TrackMetadata(
+        title=(job.get("title") or "").strip(),
+        artist=(job.get("artist") or "").strip(),
+        album=(job.get("album") or "").strip(),
+        album_artist=(job.get("album_artist") or "").strip(),
+    )
+    try:
+        intent.year = int(job.get("year") or 0)
+    except (TypeError, ValueError):
+        intent.year = 0
+
+    if not has_comparable_intent(intent):
+        # Fall back to whatever the user typed, then to the search payload.
+        # The payload packs artist and title together and splitting it is a
+        # guess, so it is used whole as the title; an empty artist stays
+        # neutral rather than inventing one.
+        query = (job.get("query") or "").strip() or _search_payload(source_url)
+        intent.title = intent.title or query
+    return intent
+
+
+async def _fallback_url_for(job: dict, failed_url: str, settings: dict,
+                            intent: TrackMetadata | None = None) -> str | None:
     """Next search-source URL for a failed search job, per source_priority.
 
     Only search jobs (ytsearch1:/scsearch1:/dzsearch:) reroute - direct URLs
     are pinned to their source. Returns None when fallback is disabled, the
     job is not a search job, or no unused source remains.
+
+    The reroute is built from `intent` (the original request) rather than the
+    job row: after a rejection the row may hold the rejected source's guess at
+    what was asked for, and searching for that would walk further away from
+    the user's request with every hop.
     """
     if not settings.get("source_fallback", True):
         return None
@@ -310,19 +413,21 @@ async def _fallback_url_for(job: dict, failed_url: str, settings: dict) -> str |
         return None
     from urllib.parse import unquote
     query = unquote(failed_url.split(":", 1)[1])
-    artist = (job.get("artist") or "").strip() or query
-    title = (job.get("title") or "").strip() or query
+    intent = intent or _job_intent(job)
+    artist = intent.artist.strip() or query
+    title = intent.title.strip() or query
     return source_registry.build_search_job_url(remaining[0], artist, title)
 
 
-async def _try_fallback(job_id: int, job: dict, failed_url: str, settings: dict, error: str) -> bool:
+async def _try_fallback(job_id: int, job: dict, failed_url: str, settings: dict,
+                         error: str, intent: "TrackMetadata | None" = None) -> bool:
     """Requeue a failed search job on the next source in source_priority.
 
     Returns True when the job was rerouted (the caller must not retry or
     fail it). Direct-URL jobs never reroute; retries are not consumed by a
     source switch so each source gets a fair shot.
     """
-    next_url = await _fallback_url_for(job, failed_url, settings)
+    next_url = await _fallback_url_for(job, failed_url, settings, intent)
     if not next_url:
         return False
     await execute(
@@ -337,6 +442,13 @@ async def _try_fallback(job_id: int, job: dict, failed_url: str, settings: dict,
 async def _process_job(job: dict):
     job_id = job["id"]
     original_url = job["source_url"]
+    # Forget any previous block before doing anything. A blocked attempt can
+    # reroute to another source and then fail there for an unrelated reason; a
+    # stale match_block would make Needs Attention blame the match for a
+    # resolve error the user never saw. Clearing up front means the column
+    # always describes the attempt that just ran, and only an attempt that
+    # actually ended at the gate leaves one behind.
+    await match_decisions.clear_block(job_id)
     source_url = original_url
     output_format = job.get("output_format", "mp3")
     quality_name = job.get("quality_profile", "balanced")
@@ -350,8 +462,26 @@ async def _process_job(job: dict):
             bitrate=profile.bitrate, sample_rate=profile.sample_rate,
         )
 
+    # What the user actually asked for, read *before* anything resolves. The
+    # job row's title/artist are double-booked: they start as the request and
+    # are overwritten with whatever the source returned. Matching has to use
+    # the request, and the row has to keep it, or a retry re-runs the gate
+    # against the previous source's guess instead of the user's request.
+    intent = _job_intent(job, original_url)
+
     logger.info(f"Processing job {job_id}: {source_url}")
     tmp_dir = _job_tmp_dir(job_id)
+
+    # Journal every file-mutating step so a crash is recoverable. Idempotent
+    # on job id, so a retried job reattaches to its own operation.
+    op_id = await ops.begin_operation(
+        f"job:{job_id}", job_id=job_id, kind="download",
+        title=job.get("title") or "", artist=job.get("artist") or "",
+        album=job.get("album") or "",
+        album_artist=job.get("album_artist") or job.get("artist") or "",
+        track_number=job.get("track_number") or 0,
+        source_url=source_url,
+    )
 
     try:
         # Deezer search jobs resolve to a concrete track URL first; "nothing
@@ -381,28 +511,83 @@ async def _process_job(job: dict):
             source_type_str = detect_source(source_url)
 
         meta = await resolver.resolve(source_url)
-        await _update_job(job_id, title=meta.title, artist=meta.artist, progress=10)
+        if not has_comparable_intent(intent):
+            # Nothing was requested, so the row had nothing to keep; fill it
+            # in from the source so the queue shows what was fetched.
+            await _update_job(job_id, title=meta.title, artist=meta.artist)
+        await _update_job(job_id, progress=10)
 
         await _set_state(job_id, JobState.MATCHING, 10)
         await emit_job_update(job_id, "matching", 10)
+        # Everything the source could tell us about itself. The old code built
+        # this from `meta` and then scored `meta` against it, so every field
+        # matched itself and the score was a constant 80% - which is why
+        # match_threshold could never reject a download.
         candidate = SourceCandidate(
             url=source_url,
             source_type=SourceType(source_type_str) if source_type_str in [e.value for e in SourceType] else SourceType.UNKNOWN,
             title=meta.title,
             artist=meta.artist,
+            album=meta.album,
             duration=meta.duration,
+            metadata={
+                "album_artist": meta.album_artist,
+                "track_number": meta.track_number,
+                "year": meta.year,
+            },
         )
-        match = score_candidate(meta, candidate)
-        conf_level = confidence_level(match.confidence)
-        logger.info(f"Job {job_id} match: {match.confidence}% ({conf_level})")
 
-        match_threshold = settings.get("match_threshold", 70)
-        if match.confidence < match_threshold:
-            raise DownloadError(
-                f"Match confidence {match.confidence}% below threshold {match_threshold}%: "
-                f"{match.explanation}",
-                recoverable=False,
+        if not has_comparable_intent(intent):
+            # A bare URL with nothing said about it: there is no request to
+            # hold the source to, so the gate cannot mean anything. Say so
+            # rather than reporting a neutral score as agreement.
+            logger.info(
+                "Job %s: no title or artist requested, so there is nothing to "
+                "match %s against; match_threshold not applied",
+                job_id, source_url,
             )
+        else:
+            match = score_candidate(intent, candidate)
+            conf_level = confidence_level(match.confidence)
+            logger.info(
+                "Job %s match: %.1f%% (%s) vs requested '%s - %s': %s",
+                job_id, match.confidence, conf_level,
+                intent.artist, intent.title, match.explanation,
+            )
+
+            match_threshold = settings.get("match_threshold", 70)
+            if match.confidence < match_threshold:
+                # An explicit user "accept" from Needs Attention, and it lasts
+                # exactly this one attempt. consume_override() clears the flag
+                # in the same statement that uses it, so a later retry cannot
+                # inherit a bypass nobody asked for a second time.
+                if await match_decisions.consume_override(job_id):
+                    logger.info(
+                        "Job %s: match %.1f%% is under threshold %.0f%% but the "
+                        "user accepted this candidate; downloading it anyway",
+                        job_id, match.confidence, match_threshold,
+                    )
+                    await _update_job(
+                        job_id,
+                        error=f"Accepted by user at {match.confidence:.1f}% "
+                              f"(threshold {match_threshold}%)",
+                    )
+                else:
+                    # Remember the rejected candidate before raising, so Needs
+                    # Attention can offer accept/reject/re-point on the exact
+                    # thing the gate looked at rather than re-resolving the
+                    # source later (which may be gone by then).
+                    await match_decisions.record_block(
+                        job_id, intent=intent, candidate=candidate,
+                        score=match.confidence, threshold=match_threshold,
+                        explanation=match.explanation, source_url=source_url,
+                    )
+                    raise DownloadError(
+                        f"Match confidence {match.confidence}% below threshold "
+                        f"{match_threshold}%: wanted '{intent.artist} - {intent.title}', "
+                        f"source says '{meta.artist} - {meta.title}'. {match.explanation}",
+                        recoverable=False,
+                    )
 
         thumb_path = ""
         # Use Deezer adapter for Deezer URLs, yt-dlp for everything else
@@ -459,6 +644,7 @@ async def _process_job(job: dict):
                 f"(`deemix login`) for a premium ARL to unlock 320/FLAC."
             )
         await _update_job(job_id, progress=65)
+        await ops.advance(op_id, OpState.DOWNLOADED, staged_path=actual_path)
 
         await _set_state(job_id, JobState.CONVERTING, 65)
         await emit_job_update(job_id, "converting", 65)
@@ -468,6 +654,7 @@ async def _process_job(job: dict):
 
         await convert(actual_path, conv_path, profile=profile)
         await _update_job(job_id, progress=80)
+        await ops.advance(op_id, OpState.VALIDATED, staged_path=conv_path)
 
         await _set_state(job_id, JobState.TAGGING, 80)
         await emit_job_update(job_id, "tagging", 80)
@@ -496,6 +683,7 @@ async def _process_job(job: dict):
             await _update_job(job_id, error=f"Tag write failed: {exc}")
             await emit_log("warning", f"Tag write failed for job {job_id}: {exc}", source="tagger")
         await _update_job(job_id, progress=90)
+        await ops.advance(op_id, OpState.TAGGED, staged_path=conv_path)
 
         await _set_state(job_id, JobState.ORGANIZING, 90)
         await emit_job_update(job_id, "organizing", 90)
@@ -510,10 +698,15 @@ async def _process_job(job: dict):
             duplicate_policy=dup_policy,
         )
         await _update_job(job_id, progress=97)
+        # Journal the destination before touching SQLite. If the process dies
+        # between here and the INSERT below, reconcile() finds the file in the
+        # library and indexes it instead of losing the track.
+        await ops.advance(op_id, OpState.ORGANIZED, final_path=final_path, staged_path="")
 
         await _set_state(job_id, JobState.INDEXING, 97)
         await emit_job_update(job_id, "indexing", 97)
-        await _add_to_library(final_path, meta, source_url)
+        track_id = await _add_to_library(final_path, meta, source_url)
+        await ops.advance(op_id, OpState.COMMITTED, track_id=track_id, error="")
         await _set_state(job_id, JobState.COMPLETE, 100)
         await emit_job_update(job_id, "complete", 100, output_path=final_path)
         await emit("library_change", {"action": "added"})
@@ -524,7 +717,7 @@ async def _process_job(job: dict):
         log_error(e, ErrorContext(operation="resolve", job_id=job_id, source_url=source_url))
         # Search jobs try the next source before parking: a YouTube 429 says
         # nothing about Deezer or SoundCloud.
-        if await _try_fallback(job_id, job, original_url, settings, str(e)):
+        if await _try_fallback(job_id, job, original_url, settings, str(e), intent=intent):
             return
         if is_rate_limit_error(str(e)):
             retries = job.get("retries", 0) + 1
@@ -542,7 +735,7 @@ async def _process_job(job: dict):
 
     except (DownloadError, ConversionError, TagError, OrganizeError) as e:
         log_error(e, ErrorContext(operation=e.code, job_id=job_id, source_url=source_url))
-        if await _try_fallback(job_id, job, original_url, settings, str(e)):
+        if await _try_fallback(job_id, job, original_url, settings, str(e), intent=intent):
             return
         if is_rate_limit_error(str(e)) and e.recoverable:
             retries = job.get("retries", 0) + 1
@@ -560,7 +753,7 @@ async def _process_job(job: dict):
 
     except Exception as e:
         log_error(e, ErrorContext(operation="unknown", job_id=job_id, source_url=source_url))
-        if await _try_fallback(job_id, job, original_url, settings, str(e)):
+        if await _try_fallback(job_id, job, original_url, settings, str(e), intent=intent):
             return
         if is_rate_limit_error(str(e)):
             retries = job.get("retries", 0) + 1
@@ -582,41 +775,24 @@ async def _process_job(job: dict):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-async def _add_to_library(file_path: str, meta: TrackMetadata, source_url: str):
-    """Insert a newly downloaded track into the library."""
-    try:
-        tags = await read_tags(file_path)
-    except Exception:
-        tags = {}
+async def _add_to_library(file_path: str, meta: TrackMetadata, source_url: str) -> int:
+    """Insert a newly downloaded track into the library. Returns the track id.
 
-    parsed = parse_artists(meta.artist)
-    file_size = Path(file_path).stat().st_size if Path(file_path).exists() else 0
-    await execute("""
-        INSERT OR REPLACE INTO tracks
-        (file_path, title, artist, primary_artist, featured_artists, display_artist,
-         album_artist, album, track_number, disc_number,
-         year, genre, duration, file_size, format, bitrate, sample_rate,
-         cover_art_path, source_url, source_type, file_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'present')
-    """, (
+    Delegates to the operation journal's indexer so a file recovered by
+    crash reconciliation is indexed through exactly the same path as a live
+    one - same tags, same provenance, no second copy of the INSERT.
+    """
+    return await ops.index_file(
         file_path,
-        tags.get("title", meta.title),
-        tags.get("artist", meta.artist),
-        parsed["primary"],
-        ",".join(parsed["featured"]),
-        parsed["display"],
-        tags.get("album_artist", parsed["album_artist"]),
-        tags.get("album", meta.album),
-        tags.get("track_number", meta.track_number),
-        tags.get("disc_number", meta.disc_number),
-        tags.get("year", meta.year),
-        tags.get("genre", meta.genre),
-        tags.get("duration", meta.duration),
-        file_size,
-        Path(file_path).suffix.lstrip("."),
-        tags.get("bitrate", 0),
-        tags.get("sample_rate", 0),
-        tags.get("cover_art_path", ""),
+        {
+            "title": meta.title,
+            "artist": meta.artist,
+            "album": meta.album,
+            "year": meta.year,
+            "genre": meta.genre,
+            "track_number": meta.track_number,
+            "disc_number": meta.disc_number,
+            "duration": meta.duration,
+        },
         source_url,
-        "download",
-    ))
+    )

@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backend.pipeline.models import TrackMetadata, SourceCandidate, SourceType
 from backend.pipeline.matcher import (
     score_candidate, rank_candidates, confidence_level,
-    _strip_artist_from_title,
+    _strip_artist_from_title, has_comparable_intent,
 )
 
 
@@ -105,3 +105,127 @@ class TestRankCandidates:
     def test_empty(self):
         desired = TrackMetadata(title="Song")
         assert rank_candidates(desired, []) == []
+
+
+class TestMissingEvidenceIsNeutral:
+    """A field nobody stated is unknown, not wrong."""
+
+    def test_source_without_an_album_is_not_a_wrong_album(self):
+        desired = TrackMetadata(title="Lovefool", artist="The Cardigans",
+                                album="Gran Turismo")
+        cand = SourceCandidate(url="yt", title="Lovefool", artist="The Cardigans")
+        result = score_candidate(desired, cand)
+        assert result.breakdown["album"] == 0.5
+
+    def test_a_genuinely_wrong_album_scores_below_neutral(self):
+        desired = TrackMetadata(title="Lovefool", artist="The Cardigans",
+                                album="Gran Turismo")
+        cand = SourceCandidate(url="yt", title="Lovefool", artist="The Cardigans",
+                              album="With My Friends")
+        result = score_candidate(desired, cand)
+        assert result.breakdown["album"] < 0.5
+
+    def test_an_unstated_request_field_does_not_penalise_the_source(self):
+        """A playlist job asks for title+artist; the source adding an album
+        must not make a correct match look worse."""
+        desired = TrackMetadata(title="Lovefool", artist="The Cardigans")
+        cand = SourceCandidate(url="yt", title="Lovefool", artist="The Cardigans",
+                              album="Gran Turismo")
+        result = score_candidate(desired, cand)
+        assert result.breakdown["album"] == 0.5
+        assert result.confidence >= 80
+
+    def test_an_identity_less_candidate_is_a_hard_zero(self):
+        """It said nothing, so it cannot ride the neutral floor."""
+        result = score_candidate(
+            TrackMetadata(title="Lovefool", artist="The Cardigans"),
+            SourceCandidate(url=""),
+        )
+        assert result.confidence == 0.0
+        assert result.breakdown == {}
+
+    def test_source_album_artist_is_preferred_over_reparsing_the_artist(self):
+        desired = TrackMetadata(title="Song", artist="Artist",
+                                album_artist="Various Artists")
+        cand = SourceCandidate(
+            url="yt", title="Song", artist="Artist",
+            metadata={"album_artist": "Various Artists"})
+        assert score_candidate(desired, cand).breakdown["album_artist"] == 1.0
+
+
+class TestIntentAgainstSource:
+    """The bug this file has to prevent.
+
+    The downloader used to build the candidate from the resolved metadata and
+    then score that metadata against itself, so every field matched itself and
+    the confidence was a constant 80.0 whatever the source was. A constant
+    above the default threshold means match_threshold can never reject
+    anything - the setting is decorative.
+    """
+
+    WANTED = TrackMetadata(title="Lovefool", artist="The Cardigans")
+
+    def _source(self, title, artist, **kw):
+        return SourceCandidate(url="yt", title=title, artist=artist, **kw)
+
+    def test_score_varies_with_the_source(self):
+        right = score_candidate(self.WANTED, self._source(
+            "Lovefool", "The Cardigans", album="Gran Turismo")).confidence
+        wrong_track = score_candidate(self.WANTED, self._source(
+            "Hounds of Love", "The Cardigans")).confidence
+        wrong_artist = score_candidate(self.WANTED, self._source(
+            "Lovefool", "Carly Simon")).confidence
+
+        assert len({right, wrong_track, wrong_artist}) == 3, \
+            "confidence is constant again - intent and source are the same data"
+
+    def test_the_correct_track_clears_the_default_threshold(self):
+        result = score_candidate(self.WANTED, self._source(
+            "The Cardigans - Lovefool (Official Video)", "The Cardigans",
+            album="Gran Turismo"))
+        assert result.confidence >= 70, result.explanation
+
+    def test_the_wrong_track_falls_below_the_default_threshold(self):
+        result = score_candidate(self.WANTED, self._source(
+            "Creep", "Radiohead", album="Pablo Honey"))
+        assert result.confidence < 70, result.explanation
+
+    def test_a_variant_is_rejected_when_a_variant_was_not_asked_for(self):
+        """A live take is a different recording, not the track that was asked for."""
+        result = score_candidate(self.WANTED, self._source(
+            "Lovefool (Live)", "The Cardigans"))
+        assert result.confidence < 70
+        assert any("variant" in w.lower() for w in result.warnings)
+
+    def test_a_reissue_of_the_same_recording_is_accepted(self):
+        result = score_candidate(self.WANTED, self._source(
+            "Lovefool (Remastered 2003)", "The Cardigans"))
+        assert result.confidence >= 70, result.explanation
+
+
+class TestHasComparableIntent:
+    def test_a_stated_track_is_comparable(self):
+        assert has_comparable_intent(TrackMetadata(title="Lovefool")) is True
+        assert has_comparable_intent(TrackMetadata(artist="Cardigans")) is True
+        assert has_comparable_intent(TrackMetadata(album="Gran Turismo")) is True
+
+    def test_a_bare_url_request_is_not(self):
+        """Scoring against a blank request lands on the neutral floor and says
+        nothing about the source, so callers must be able to detect it."""
+        assert has_comparable_intent(TrackMetadata()) is False
+        assert has_comparable_intent(TrackMetadata(title="  ", artist="")) is False
+
+
+class TestStripArtistFromTitleWithLeadingArticle:
+    def test_strips_prefix_when_the_artist_has_a_leading_article(self):
+        # normalize_artist drops 'The' but normalize_title does not, so a
+        # plain startswith test misses every such artist.
+        assert _strip_artist_from_title(
+            "The Cardigans - Lovefool (Official Video)", "The Cardigans") == "lovefool"
+
+    def test_still_strips_without_an_article(self):
+        assert _strip_artist_from_title("Coldplay - Clocks", "Coldplay") == "clocks"
+
+    def test_does_not_strip_a_word_that_only_looks_like_the_artist(self):
+        r = _strip_artist_from_title("Cardigans (Live)", "The Cardigans")
+        assert r == "cardigans"

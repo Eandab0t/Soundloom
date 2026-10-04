@@ -7,6 +7,21 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def isolate_db_backups(tmp_path, monkeypatch):
+    """Keep pre-migration snapshots out of the real data directory.
+
+    Any test whose database is fresh has every migration pending, so
+    run_migrations() takes a snapshot first. Left alone it writes into the
+    user's real data/backups/db, where the keep-5 prune can evict genuine
+    pre-migration copies. Redirect it for the duration of every test.
+    """
+    from backend.services import backup as backup_svc
+    dest = tmp_path / "db_backups"
+    dest.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(backup_svc, "DB_BACKUP_DIR", dest)
+
+
 @pytest.fixture
 def tmp_library(tmp_path):
     """Create a temporary library directory with a few dummy files."""

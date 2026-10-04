@@ -35,6 +35,9 @@ from backend.api.autofix import router as autofix_router
 from backend.api.identify import router as identify_router
 from backend.api.sync import router as sync_router
 from backend.api.playlists import router as playlists_router, auth_router as connections_router
+from backend.api.operations import router as operations_router
+from backend.api.attention import router as attention_router
+from backend.api.matches import router as matches_router
 
 setup_logging(config.LOGS_DIR)
 logger = logging.getLogger("soundloom")
@@ -68,8 +71,19 @@ async def lifespan(app: FastAPI):
     config._ensure_dirs()
     await init_db()
     from backend.services.downloader import start_worker, stop_worker, set_concurrency, reclaim_orphans
+    from backend.services.operations import reconcile
     from backend.services.watcher import start_watcher, stop_watcher
     from backend.services.sync import start_sync_loop, stop_sync_loop
+    # Order matters. reconcile() asks the disk what actually finished and
+    # indexes it, reclaim_orphans() then sweeps only what no operation still
+    # owns. Sweeping first would delete resumable artifacts.
+    try:
+        recovery = await reconcile()
+        if recovery.get("examined"):
+            logger.info("Startup recovery: %s", recovery)
+    except Exception as e:
+        # A recovery bug must never stop the app from starting.
+        logger.exception("Startup reconciliation failed, continuing: %s", e)
     await reclaim_orphans()
 
     # Bring the library rows back in line with the disk before anything reads
@@ -94,6 +108,19 @@ async def lifespan(app: FastAPI):
             # A verification bug must never stop the app from starting, and
             # must never be the reason a library looks empty.
             logger.exception("Startup library verify failed, continuing: %s", e)
+
+    # Needs Attention: register the producers, then take a first snapshot so
+    # the list is populated before the UI asks for it. A scan failure must not
+    # block startup - the list will simply be empty until the next refresh.
+    try:
+        from backend.services.attention_producers import register_default_producers
+        from backend.services.attention import run_producers
+        register_default_producers()
+        snapshot = await run_producers()
+        if snapshot["raised"] or snapshot["auto_resolved"]:
+            logger.info("Needs Attention: %s", snapshot)
+    except Exception as e:
+        logger.warning("Needs Attention scan skipped at startup: %s", e)
 
     await start_worker()
     max_dl = config.get("max_concurrent_downloads", 1)
@@ -141,6 +168,9 @@ app.include_router(sync_router)
 app.include_router(playlists_router)
 app.include_router(connections_router)
 app.include_router(system_router)
+app.include_router(operations_router)
+app.include_router(attention_router)
+app.include_router(matches_router)
 
 FRONTEND_DIR = config.FRONTEND_DIR
 

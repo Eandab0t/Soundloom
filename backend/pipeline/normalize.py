@@ -36,8 +36,12 @@ def normalize_artist(artist: str) -> str:
 def normalize_title(title: str) -> str:
     """Normalize title for matching. NEVER store this as canonical."""
     n = normalize_text(title)
-    n = re.sub(r"\s*\(.*?(live|remix|acoustic|radio|edit|version).*?\)\s*", " ", n, flags=re.IGNORECASE)
-    n = re.sub(r"\s*\[.*?(live|remix|acoustic|radio|edit|version).*?\]\s*", " ", n, flags=re.IGNORECASE)
+    # Reissue/edition noise identifies the same recording, so it must not drag
+    # the score down: "Lovefool" and "Lovefoul (Remastered 2003)" are one
+    # track, and a matcher that cannot see that would reject the correct file.
+    edition = r"live|remix|acoustic|radio|edit|version|remastered?|reissue|deluxe|expanded|explicit|mono|stereo|bonus|anniversary|album version"
+    n = re.sub(rf"\s*\(.*?(?:{edition}).*?\)\s*", " ", n, flags=re.IGNORECASE)
+    n = re.sub(rf"\s*\[.*?(?:{edition}).*?\]\s*", " ", n, flags=re.IGNORECASE)
     n = re.sub(r"\s*-\s*(live|remix|acoustic|radio edit|extended|instrumental|karaoke|cover).*", " ", n, flags=re.IGNORECASE)
     n = re.sub(r"\(official( video| audio)?\)", " ", n, flags=re.IGNORECASE)
     n = re.sub(r"\[official( video| audio)?\]", " ", n, flags=re.IGNORECASE)
