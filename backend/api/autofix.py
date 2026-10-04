@@ -46,7 +46,7 @@ def _dedupe_artist_string(val: str) -> Optional[str]:
     """Deduplicate a comma-separated artist list; None when already clean.
 
     Mirrors cleanup.clean_artists' dedupe steps exactly: repeated words
-    within one part collapse ("Repeatedword Repeatedword" -> "Repeatedword"), then
+    within one part collapse ("Nova Nova" -> "Nova"), then
     duplicate parts collapse case-insensitively ("Alpha, alpha" -> "Alpha").
     Order and first-seen casing are preserved. Only strings containing a
     comma are considered, so single corrupted tokens are left to the

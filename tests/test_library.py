@@ -51,7 +51,7 @@ class TestListArtists:
         await init_db()
         try:
             await _seed_artists()
-            artists = await list_artists(search="inoh")
+            artists = await list_artists(search="INDUCT")
             assert [a["name"] for a in artists] == ["Inductive"]
         finally:
             await close_db()
@@ -61,9 +61,10 @@ class TestListArtists:
         from backend.api.library import list_artists
         await init_db()
         try:
-            # "i" matches Inductive (2 tracks), Soloist (1) and Repeatedword (1).
+            # "" matches every artist; ordering is by track count, so the
+            # two-track artist must come first regardless of alphabet.
             await _seed_artists()
-            artists = await list_artists(search="i")
+            artists = await list_artists(search="")
             names = [a["name"] for a in artists]
             assert "Inductive" in names and "Repeatedword" in names
             assert names[0] == "Inductive", "most tracks first"
