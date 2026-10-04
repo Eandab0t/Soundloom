@@ -1,5 +1,10 @@
 """Library API endpoints."""
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
+
+from .. import config
 from ..database import fetch_all, fetch_one, execute
 from ..services.scanner import scan_folder, get_scan_status
 
@@ -9,6 +14,49 @@ ALLOWED_SORTS = {
     "title", "artist", "album", "album_artist", "year", "duration",
     "format", "created_at", "file_size",
 }
+
+AUDIO_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".wma": "audio/x-ms-wma",
+}
+
+
+@router.get("/tracks/{track_id}/audio")
+async def stream_track_audio(track_id: int):
+    """The audio file itself, for the persistent player.
+
+    FileResponse honours Range requests, which is what lets the player seek
+    instead of waiting for a whole track to buffer.
+    """
+    row = await fetch_one(
+        "SELECT file_path, file_status FROM tracks WHERE id = ?", (track_id,))
+    if not row:
+        raise HTTPException(404, "Track not found")
+
+    path = Path(row["file_path"] or "")
+    if row["file_status"] == "missing" or not path.is_file():
+        raise HTTPException(404, "Audio file is missing from disk")
+
+    # The path comes out of the database, not the request, so it is not
+    # automatically safe: a stale or hand-edited row pointing at C:\ or a
+    # network share would otherwise turn this into a read-any-file endpoint.
+    # Serve only what lives under the configured library.
+    try:
+        resolved = path.resolve()
+        root = Path(config.get("library_path", "")).resolve()
+    except OSError:
+        raise HTTPException(404, "Audio file is unreadable")
+    if not root.is_dir() or not resolved.is_relative_to(root):
+        raise HTTPException(403, "Audio file is outside the configured library")
+
+    media_type = AUDIO_TYPES.get(resolved.suffix.lower(), "audio/mpeg")
+    return FileResponse(resolved, media_type=media_type)
 
 
 @router.get("/tracks/{track_id}/cover")

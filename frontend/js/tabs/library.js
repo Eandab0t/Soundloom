@@ -1,5 +1,6 @@
 /* Soundloom library tab — tracks / artists / albums views. */
 import { API, State, showToast, esc, fmtDuration, fmtSize, debounce, coverImg } from '../core.js';
+import { Player } from '../player.js';
 
 export const Library = {
   tracks: [], total: 0, page: 1, perPage: 100, sortBy: 'title', order: 'ASC',
@@ -38,8 +39,19 @@ export const Library = {
     if (view) view.style.display = '';
     tbody.innerHTML = this.tracks.map(t => `
       <tr data-track-id="${t.id}">
-        <td>${coverImg(t)}</td>
-        <td class="track-title">${esc(t.title)}</td>
+        <td class="lib-play-cell">
+          ${coverImg(t)}
+          <button class="lib-play" type="button" data-play="${t.id}"
+                  title="Play ${esc(t.title)}" aria-label="Play ${esc(t.title)}">
+            <svg viewBox="0 0 24 24"><path d="M6 3l14 9-14 9z"/></svg>
+          </button>
+        </td>
+        <td class="track-title">
+          <span class="track-name">${esc(t.title)}</span>
+          <button class="lib-queue" type="button" data-queue="${t.id}"
+                  title="Add to queue (Shift-click: play next)"
+                  aria-label="Add ${esc(t.title)} to queue">+</button>
+        </td>
         <td>${esc(t.artist)}</td>
         <td>${esc(t.album)}</td>
         <td class="num">${fmtDuration(t.duration)}</td>
@@ -53,6 +65,40 @@ export const Library = {
         switchToTab('metadata');
       });
     });
+
+    // Four ways in, matching what a library should let you do: play just this
+    // track, play it and everything after it, add it to the end, or jump the
+    // line. The + takes Shift-click for play-next, the same gesture the play
+    // button uses for play-from-here.
+    tbody.querySelectorAll('[data-play]').forEach(btn => {
+      const id = Number(btn.dataset.play);
+      const track = this.tracks.find(t => t.id === id);
+      if (!track) return;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.playFrom(id, track, e.shiftKey);
+      });
+    });
+    tbody.querySelectorAll('[data-queue]').forEach(btn => {
+      const id = Number(btn.dataset.queue);
+      const track = this.tracks.find(t => t.id === id);
+      if (!track) return;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.shiftKey) Player.playNext([track]);
+        else Player.enqueue([track]);
+      });
+    });
+  },
+
+  /**
+   * Play one track. Plain click plays it alone; Shift-click plays it and
+   * everything after it, which is the gesture every other music player uses.
+   */
+  playFrom(id, track, withRest = false) {
+    const i = this.tracks.findIndex(t => t.id === id);
+    const list = withRest && i >= 0 ? this.tracks.slice(i) : [track];
+    Player.setQueue(list, 0);
   },
 
   renderPagination() {

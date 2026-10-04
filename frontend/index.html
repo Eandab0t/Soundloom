@@ -527,12 +527,93 @@
 
       </main>
 
+      <!-- ============ PLAYER ============
+           A sibling of <main>, not inside any tab panel. That placement is the
+           whole point: navigation swaps .tab-panel contents and must never
+           touch the player, or the music stops when you change tab. -->
+      <section class="player" id="player" aria-label="Player">
+        <div class="player-queue" id="player-queue" hidden>
+          <div class="pq-head">
+            <span class="pq-title">Queue</span>
+            <span class="muted" id="pq-count"></span>
+            <span class="grow"></span>
+            <button class="btn ghost sm" id="pq-clear" type="button">Clear queue</button>
+            <button class="icon-btn" id="pq-close" type="button" title="Close queue" aria-label="Close queue">&#10005;</button>
+          </div>
+          <ol class="pq-list" id="pq-list"></ol>
+        </div>
+
+        <div class="player-bar">
+          <div class="pb-now">
+            <div class="pb-art" id="pb-art"></div>
+            <div class="pb-meta">
+              <div class="pb-title" id="pb-title">Nothing playing</div>
+              <div class="pb-artist" id="pb-artist">Pick something from your library</div>
+            </div>
+          </div>
+
+          <div class="pb-center">
+            <div class="pb-buttons">
+              <button class="icon-btn" id="pb-shuffle" type="button" title="Shuffle (S)" aria-label="Shuffle" aria-pressed="false">
+                <svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>
+              </button>
+              <button class="icon-btn" id="pb-prev" type="button" title="Previous (P)" aria-label="Previous track">
+                <svg viewBox="0 0 24 24"><path d="M19 20 9 12l10-8z"/><path d="M5 19V5"/></svg>
+              </button>
+              <button class="icon-btn pb-play" id="pb-play" type="button" title="Play (Space)" aria-label="Play">
+                <svg id="pb-play-icon" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9z"/></svg>
+              </button>
+              <button class="icon-btn" id="pb-next" type="button" title="Next (N)" aria-label="Next track">
+                <svg viewBox="0 0 24 24"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></svg>
+              </button>
+              <button class="icon-btn" id="pb-repeat" type="button" title="Repeat off (R)" aria-label="Repeat" aria-pressed="false">
+                <svg viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                <span class="pb-badge" id="pb-repeat-badge" hidden>1</span>
+              </button>
+            </div>
+            <div class="pb-seek">
+              <span class="pb-time" id="pb-elapsed">0:00</span>
+              <input type="range" id="pb-progress" class="pb-range" min="0" max="1000" step="1" value="0" aria-label="Seek">
+              <span class="pb-time" id="pb-duration">0:00</span>
+            </div>
+          </div>
+
+          <div class="pb-right">
+            <button class="icon-btn" id="pb-mute" type="button" title="Mute (M)" aria-label="Mute">
+              <svg viewBox="0 0 24 24" id="pb-volume-icon"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            </button>
+            <input type="range" id="pb-volume" class="pb-range pb-volume" min="0" max="1" step="0.01" value="0.9" aria-label="Volume">
+            <button class="icon-btn" id="pb-shortcuts" type="button"
+                    data-open-shortcuts title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            </button>
+            <button class="icon-btn" id="pb-queue-toggle" type="button" title="Queue (Q)" aria-label="Toggle queue" aria-expanded="false">
+              <svg viewBox="0 0 24 24"><path d="M3 6h13"/><path d="M3 12h13"/><path d="M3 18h9"/><path d="m16 15 5 3-5 3z"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <audio id="pb-audio" preload="metadata"></audio>
+      </section>
+
       <footer class="statusbar">
         <span id="status-tracks">—</span>
         <span class="status-dot" id="ws-dot" title="Live connection"></span>
         <span class="grow"></span>
         <span id="status-queue">Queue idle</span>
       </footer>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="shortcuts-sheet" role="dialog" aria-modal="true"
+       aria-labelledby="shortcuts-title" hidden>
+    <div class="modal-card sc-card">
+      <div class="modal-head">
+        <h3 id="shortcuts-title">Keyboard shortcuts</h3>
+        <button class="icon-btn" data-close type="button" title="Close (Esc)"
+                aria-label="Close">&times;</button>
+      </div>
+      <div id="shortcuts-body"></div>
     </div>
   </div>
 

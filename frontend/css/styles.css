@@ -532,6 +532,10 @@ img.cover.lg { width: 96px; height: 96px; object-fit: cover; display: block; }
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 900;
   display: grid; place-items: center;
 }
+/* `display: grid` above outranks the user-agent [hidden] rule, so without this
+   the sheet is visible on page load and never goes away. Same trap as
+   .player-queue[hidden]. */
+.modal-backdrop[hidden] { display: none; }
 .modal-card {
   width: min(620px, calc(100vw - 32px));
   background: var(--bg-raise); border: 1px solid var(--border-strong);
@@ -559,4 +563,206 @@ img.cover.lg { width: 96px; height: 96px; object-fit: cover; display: block; }
   .badge { position: absolute; top: 2px; right: 2px; margin: 0; }
   .form-grid, .form-row { grid-template-columns: 1fr; flex-direction: column; }
   .content { padding: 16px; }
+}
+
+/* ============ Persistent player ============
+   A fixed-height strip between .content and .statusbar. It is a sibling of
+   <main>, so tab navigation cannot remove it and playback survives. */
+
+.player {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-raise);
+}
+
+.player-bar {
+  display: flex; align-items: center; gap: 16px;
+  height: 64px; padding: 0 16px;
+}
+
+/* --- now playing --- */
+.pb-now { display: flex; align-items: center; gap: 11px; width: 240px; min-width: 0; }
+.pb-art {
+  width: 44px; height: 44px; flex-shrink: 0;
+  border-radius: 6px; overflow: hidden;
+  background: var(--bg-sunken); border: 1px solid var(--border);
+}
+.pb-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pb-meta { min-width: 0; }
+.pb-title {
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.pb-artist {
+  font-size: 11.5px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* --- transport --- */
+.pb-center { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.pb-buttons { display: flex; align-items: center; gap: 6px; }
+.pb-buttons .icon-btn { color: var(--text-2); position: relative; }
+.pb-buttons .icon-btn:hover { color: var(--text); }
+.pb-buttons .icon-btn.active { color: var(--accent); }
+.pb-buttons .icon-btn.active::after {
+  content: ''; position: absolute; left: 50%; bottom: -3px;
+  transform: translateX(-50%);
+  width: 4px; height: 4px; border-radius: 50%; background: var(--accent);
+}
+.pb-play {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--text); color: var(--bg);
+}
+.pb-play:hover { background: var(--text); color: var(--bg); transform: scale(1.06); }
+.pb-play svg { width: 17px; height: 17px; fill: currentColor; flex-shrink: 0; }
+/* The transport icons are stroke-drawn paths with no intrinsic size, so without an
+   explicit box they collapse to zero width inside the flex button. */
+.pb-buttons .icon-btn:not(.pb-play) svg,
+.pb-right .icon-btn svg {
+  width: 16px; height: 16px; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.pb-badge {
+  position: absolute; top: -1px; right: -1px;
+  background: var(--accent); color: var(--accent-contrast);
+  font-size: 9px; font-weight: 700; line-height: 1;
+  padding: 2px 3px; border-radius: 4px;
+}
+
+.pb-seek { display: flex; align-items: center; gap: 9px; width: 100%; max-width: 560px; }
+.pb-time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; min-width: 34px; text-align: center; }
+
+/* --- range inputs --- */
+.pb-range {
+  flex: 1; height: 4px; min-width: 0;
+  -webkit-appearance: none; appearance: none;
+  background: var(--border-strong); border-radius: 2px;
+  cursor: pointer; outline: none;
+}
+.pb-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text); border: none;
+  opacity: 0; transition: opacity var(--transition);
+}
+.pb-range:hover::-webkit-slider-thumb, .pb-range:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.pb-range::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--text); border: none; opacity: 0;
+}
+.pb-range:hover::-moz-range-thumb, .pb-range:focus-visible::-moz-range-thumb { opacity: 1; }
+.pb-volume { flex: 0 0 86px; }
+
+/* --- right side --- */
+.pb-right { display: flex; align-items: center; gap: 8px; justify-content: flex-end; width: 240px; }
+
+/* --- queue panel --- */
+.player-queue {
+  border-bottom: 1px solid var(--border);
+  max-height: 320px; display: flex; flex-direction: column;
+}
+/* An explicit display beats the UA stylesheet's [hidden] { display: none },
+   so the queue panel would stay open with an empty list. */
+.player-queue[hidden] { display: none; }
+.pq-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+}
+.pq-title { font-size: 13px; font-weight: 600; }
+.pq-list { list-style: none; overflow-y: auto; padding: 4px 0; }
+.pq-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 16px; font-size: 13px; cursor: pointer;
+}
+.pq-item:hover { background: var(--bg-hover); }
+.pq-item.current { background: var(--accent-dim); }
+.pq-item.current .pq-item-title { color: var(--accent); }
+.pq-index { width: 20px; color: var(--text-3); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.pq-item.playing .pq-index { color: var(--accent); }
+.pq-item-main { min-width: 0; flex: 1; }
+.pq-item-title, .pq-item-artist { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pq-item-title { font-weight: 500; }
+.pq-item-artist { font-size: 11.5px; color: var(--text-2); }
+.pq-item-dur { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.pq-item-remove {
+  opacity: 0; border: none; background: none; color: var(--text-3);
+  cursor: pointer; font-size: 14px; padding: 2px 4px; line-height: 1;
+}
+.pq-item:hover .pq-item-remove { opacity: 1; }
+.pq-item-remove:hover { color: var(--error); }
+.pq-empty { padding: 22px 16px; color: var(--text-3); font-size: 13px; text-align: center; }
+
+@media (max-width: 860px) {
+  .pb-now, .pb-right { width: auto; }
+  .pb-artist, .pb-volume { display: none; }
+}
+
+/* ============ Library row play controls ============ */
+.lib-play-cell { position: relative; width: 52px; }
+.lib-play {
+  position: absolute; inset: 4px 10px 4px 4px;
+  display: none; align-items: center; justify-content: center;
+  border: none; border-radius: 6px; cursor: pointer;
+  background: rgba(0, 0, 0, 0.55); color: #fff;
+}
+.lib-play svg { width: 16px; height: 16px; fill: currentColor; }
+.lib-play-cell:hover .lib-play { display: flex; }
+.lib-play:hover { background: var(--accent); color: var(--accent-contrast); }
+
+.track-title { position: relative; }
+.track-name { display: inline-block; max-width: calc(100% - 24px); }
+.lib-queue {
+  opacity: 0; margin-left: 6px; padding: 0 5px;
+  border: 1px solid var(--border-strong); border-radius: 5px;
+  background: transparent; color: var(--text-2);
+  font-size: 12px; line-height: 1.4; cursor: pointer;
+  vertical-align: middle;
+}
+tr:hover .lib-queue { opacity: 1; }
+.lib-queue:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ===========================================================================
+   KEYBOARD SHORTCUTS SHEET
+
+   Reuses the existing .modal-backdrop / .modal-card pair, which were already
+   in the stylesheet but unused by any markup until now.
+   ========================================================================= */
+
+.sc-card { width: min(660px, calc(100vw - 32px)); max-height: min(78vh, 720px); overflow: auto; }
+
+.sc-group + .sc-group { margin-top: 16px; }
+.sc-title {
+  margin: 0 0 7px; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-3);
+}
+.sc-list { margin: 0; display: grid; gap: 3px; }
+
+.sc-row {
+  display: grid; grid-template-columns: 200px 1fr; gap: 12px; align-items: baseline;
+  padding: 5px 8px; border-radius: 7px;
+}
+.sc-row:nth-child(odd) { background: var(--bg); }
+.sc-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0; }
+
+/* A key cap, not a label: the point is that it looks pressable. */
+.sc-key {
+  font-family: var(--font); font-size: 11.5px; font-weight: 600;
+  color: var(--text); background: var(--bg-hover);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  border-radius: 5px; padding: 2px 7px; white-space: nowrap;
+}
+/* A mouse gesture or an on-screen button: flat and muted, so it is never
+   mistaken for something you press on the keyboard. */
+.sc-gesture {
+  font-family: var(--font); font-size: 11.5px; color: var(--text-2);
+  background: transparent; border: 1px dashed var(--border-strong);
+  border-radius: 5px; padding: 2px 7px; white-space: nowrap;
+}
+.sc-label { margin: 0; font-size: 12.5px; color: var(--text-2); }
+
+.sc-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+
+@media (max-width: 620px) {
+  .sc-row { grid-template-columns: 1fr; gap: 2px; }
+  .sc-label { padding-left: 2px; }
 }

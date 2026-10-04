@@ -14,12 +14,18 @@ import { Convert } from './tabs/convert.js';
 import { Settings } from './tabs/settings.js';
 import { Logs } from './tabs/logs.js';
 import { Fix } from './tabs/fix.js';
+import { Player } from './player.js';
+import { Shortcuts } from './shortcuts.js';
 
 const App = {
   init() {
     this.setupNav();
     this.setupTheme();
     this.setupKeyboard();
+    // Initialised before the tabs so a restored queue is already rendering
+    // when the library's first paint lands.
+    Player.init();
+    Shortcuts.init();
     this.startHeartbeat();
     this.wireEvents();
     Bus.connect();
@@ -144,6 +150,6 @@ const App = {
 
 // Expose the modules the inline HTML onclick handlers reference.
 // (AddSource and Logs were missing before — their buttons silently threw.)
-Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix });
+Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Shortcuts });
 
 document.addEventListener('DOMContentLoaded', () => App.init());
