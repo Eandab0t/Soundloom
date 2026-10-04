@@ -110,9 +110,34 @@
             </div>
           </div>
 
+          <div class="lib-counts" id="lib-counts" role="group" aria-label="Library counts">
+            <button type="button" class="lib-count" data-status="all">
+              <span class="lib-count-label">All tracks</span>
+              <span class="lib-count-value" id="count-all">–</span>
+            </button>
+            <button type="button" class="lib-count" data-status="present">
+              <span class="lib-count-label">Available</span>
+              <span class="lib-count-value" id="count-available">–</span>
+            </button>
+            <button type="button" class="lib-count is-warn" data-status="missing">
+              <span class="lib-count-label">Missing</span>
+              <span class="lib-count-value" id="count-missing">–</span>
+            </button>
+            <button type="button" class="lib-count is-quiet" data-status="archived">
+              <span class="lib-count-label">Archived</span>
+              <span class="lib-count-value" id="count-archived">–</span>
+            </button>
+          </div>
+
           <div class="toolbar" id="lib-toolbar">
             <input type="text" id="lib-search" class="input sm grow" placeholder="Filter tracks…" oninput="Library.debounceSearch()">
             <select id="lib-artist-filter" class="input sm" onchange="Library.loadTracks()"><option value="">All artists</option></select>
+            <select id="lib-status-filter" class="input sm" onchange="Library.setStatusFilter(this.value)">
+              <option value="">Available</option>
+              <option value="missing">Missing</option>
+              <option value="archived">Archived</option>
+              <option value="all">Everything</option>
+            </select>
             <select id="lib-format-filter" class="input sm" onchange="Library.loadTracks()">
               <option value="">All formats</option>
               <option value="mp3">MP3</option><option value="m4a">M4A</option>
@@ -132,6 +157,7 @@
                   <th class="sortable num" data-sort="duration" onclick="Library.sort('duration')">⏱</th>
                   <th data-sort="format">Format</th>
                   <th class="sortable num" data-sort="file_size" onclick="Library.sort('file_size')">Size</th>
+                  <th class="th-actions"><span class="sr-only">Actions</span></th>
                 </tr></thead>
                 <tbody id="tracks-body"></tbody>
               </table>
