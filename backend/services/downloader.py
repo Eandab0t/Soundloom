@@ -38,6 +38,7 @@ from ..pipeline.editor import apply_metadata_to_file
 from ..pipeline.cleanup import run_cleanup
 from ..sources.ytdlp_source import YtdlpResolver, YtdlpDownloader, detect_source
 from ..sources.deezer_source import DeezerResolver, DeezerDownloader, is_deezer_url, detect_deezer
+from ..sources.local_source import LocalResolver, LocalDownloader, detect_local
 from . import source_registry
 from ..services.converter import convert
 from ..services.organizer import organize_file
@@ -501,9 +502,16 @@ async def _process_job(job: dict):
         await _set_state(job_id, JobState.RESOLVING, 5)
         await emit_job_update(job_id, "resolving")
 
-        # Route to Deezer adapter if URL is from Deezer
+        # Route to a local adapter when the input is a file on this
+        # machine. Checked before Deezer because a path is not a URL
+        # at all, and handing one to yt-dlp failed on extraction
+        # rather than on anything the user could act on.
+        local_path = detect_local(source_url)
         is_deezer = is_deezer_url(source_url)
-        if is_deezer:
+        if local_path is not None:
+            resolver = LocalResolver()
+            source_type_str = SourceType.LOCAL.value
+        elif is_deezer:
             resolver = DeezerResolver()
             source_type_str = detect_deezer(source_url) or "deezer"
         else:
@@ -590,8 +598,11 @@ async def _process_job(job: dict):
                     )
 
         thumb_path = ""
-        # Use Deezer adapter for Deezer URLs, yt-dlp for everything else
-        if is_deezer:
+        # Deezer adapter for Deezer URLs, the copier for local paths,
+        # yt-dlp for everything else.
+        if local_path is not None:
+            downloader = LocalDownloader()
+        elif is_deezer:
             downloader = DeezerDownloader(
                 bitrate=_deemix_bitrate(profile),
                 fallback_bitrate="128",
@@ -608,6 +619,13 @@ async def _process_job(job: dict):
 
         await _set_state(job_id, JobState.DOWNLOADING, 15)
         await emit_job_update(job_id, "downloading", 15)
+        # The journal's chain is QUEUED -> DOWNLOADING -> DOWNLOADED, and
+        # nothing else writes DOWNLOADING. Without this the first
+        # advance after the fetch asked for DOWNLOADED straight out of
+        # QUEUED, which the state machine rejects - so every job died
+        # here with an OperationError, the `finally` below deleted the
+        # staging tree, and no download could ever complete.
+        await ops.advance(op_id, OpState.DOWNLOADING)
         dl_dir = tmp_dir / "downloads"
         dl_dir.mkdir(parents=True, exist_ok=True)
         dl_base = str(dl_dir / f"dl_{uuid.uuid4().hex[:12]}")

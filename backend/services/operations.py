@@ -337,7 +337,14 @@ async def index_file(file_path: str, metadata: dict, source_url: str = "",
     # references it.
     from .acquisition import record as record_acquisition
 
-    source_name = source_url.split(":", 1)[0] if source_url else ""
+    # Only a real URL has a scheme. Splitting on the first colon also
+    # splits a Windows path, which is how a local acquisition ended up
+    # recorded as source="E" - a drive letter wearing a provenance
+    # label. One character of drive is also never a scheme, since a
+    # scheme is at least two characters before the colon.
+    scheme, sep, _ = (source_url or "").partition(":")
+    source_name = scheme if sep and len(scheme) > 1 else (
+        "local" if source_url else "")
     await record_acquisition(
         track_id=track_id,
         file_path=file_path,

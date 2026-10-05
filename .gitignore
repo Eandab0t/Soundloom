@@ -12,9 +12,6 @@ venv/
 data/*
 !data/settings.example.json
 
-# Local agent bookkeeping
-.freebuff/
-
 # Project ops doc (private: machine paths, library history)
 HANDOFF.md
 

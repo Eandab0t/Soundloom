@@ -7,6 +7,7 @@ library that Soundloom did not know about. Reconcile() rolls that forward.
 Covers the state machine, journal idempotency, every crash point in the
 pipeline, and that recovery never runs twice into a duplicate.
 """
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -620,3 +621,70 @@ class TestRecoveredTrackQuality:
             assert job["output_path"] == str(final)
         finally:
             await close_db()
+
+
+# ---------------------------------------------------------------------------
+# The pipeline has to walk the journal legally
+# ---------------------------------------------------------------------------
+
+class TestPipelineJournalChain:
+    """The state machine was never wrong; the caller was.
+
+    `test_operations.py` already walks QUEUED -> DOWNLOADING -> ... -> COMMITTED
+    by hand and passes, which is exactly why the bug survived: every test
+    supplied the step the production code was missing. `LEGAL_TRANSITIONS`
+    rejects QUEUED -> DOWNLOADED, and nothing wrote DOWNLOADING, so the first
+    `advance()` after a fetch raised, the generic handler caught it, and
+    `finally` deleted the staging tree. No download could complete, for any
+    source, since the journal landed.
+
+    So the invariant pinned here is about the production call sequence, read
+    out of the source, rather than about a hand-written walk.
+    """
+
+    def _pipeline_states(self):
+        import ast
+        import inspect
+
+        import backend.services.downloader as dl
+        src = inspect.getsource(dl._process_job)
+        tree = ast.parse(textwrap.dedent(src))
+        states = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "advance"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "ops"
+                    and len(node.args) >= 2):
+                continue
+            arg = node.args[1]
+            if isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name) \
+                    and arg.value.id == "OpState":
+                states.append((arg.lineno, arg.attr))
+        # Source order is pipeline order.
+        return [name for _, name in sorted(states)]
+
+    def test_the_pipeline_walks_the_chain_the_machine_allows(self):
+        states = self._pipeline_states()
+        assert states, "no ops.advance(OpState...) calls found; " \
+                       "the test is not looking at the right function"
+
+        current = OpState.QUEUED
+        for name in states:
+            nxt = OpState[name]
+            assert nxt in ops.LEGAL_TRANSITIONS[current], (
+                f"{current.value} -> {nxt.value} is not a legal transition; "
+                f"allowed: {sorted(s.value for s in ops.LEGAL_TRANSITIONS[current])}"
+            )
+            current = nxt
+
+    def test_every_forward_state_the_chain_defines_is_actually_written(self):
+        """A state in the table that no code writes is a step the pipeline
+        skips - which is the bug, restated as a coverage question."""
+        written = set(self._pipeline_states())
+        assert "DOWNLOADING" in written, (
+            "nothing advances the journal to DOWNLOADING, so the first "
+            "advance after the fetch is illegal")
+        assert written >= {"DOWNLOADING", "DOWNLOADED", "VALIDATED", "TAGGED",
+                           "ORGANIZED", "COMMITTED"}

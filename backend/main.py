@@ -38,6 +38,7 @@ from backend.api.playlists import router as playlists_router, auth_router as con
 from backend.api.operations import router as operations_router
 from backend.api.attention import router as attention_router
 from backend.api.matches import router as matches_router
+from backend.api.forensics import router as forensics_router
 
 setup_logging(config.LOGS_DIR)
 logger = logging.getLogger("soundloom")
@@ -85,6 +86,31 @@ async def lifespan(app: FastAPI):
         # A recovery bug must never stop the app from starting.
         logger.exception("Startup reconciliation failed, continuing: %s", e)
     await reclaim_orphans()
+
+    # Record what the filesystem looked like at startup, so the
+    # transition log has a baseline to measure against rather than only
+    # the changes that happen while the app happens to be running. Never
+    # fatal: this is an instrument, and an instrument that can stop the
+    # library from starting is not one.
+    try:
+        from backend.services import forensics as _forensics
+        observed = await _forensics.observe()
+        if observed.get("transitions"):
+            logger.info("Forensics: %d transition(s) recorded at startup",
+                        observed["transitions"])
+    except Exception as fe:
+        logger.warning("Could not record forensic baseline: %s", fe)
+
+    # Keep watching after startup. A disappearance that happened while
+    # the app was closed is reconstructed at the next launch, but only
+    # as 'it was gone by then' - the sequence and the timing are the
+    # whole point of the log, and only something that was looking can
+    # supply them.
+    try:
+        from backend.services import forensics as _forensics
+        await _forensics.start_observer()
+    except Exception as fe:
+        logger.warning("Could not start continuous observation: %s", fe)
 
     # A provenance run left 'running' means the process died mid-sweep.
     # Relabel it so the panel offers an honest Resume instead of claiming
@@ -146,6 +172,14 @@ async def lifespan(app: FastAPI):
         _shutdown_task.cancel()
     await stop_sync_loop()
     await stop_watcher()
+    # The observer polls the filesystem and writes rows, so it has to
+    # be stopped before the database connection closes, alongside the
+    # backfill and content-index sweeps.
+    try:
+        from backend.services import forensics as _forensics
+        await _forensics.stop_observer()
+    except Exception as fe:
+        logger.warning("Could not stop observation cleanly: %s", fe)
     await stop_worker()
     # Stop any hashing sweep before the connection closes, or it
     # writes into a dead database on the way out.
@@ -195,6 +229,7 @@ app.include_router(system_router)
 app.include_router(operations_router)
 app.include_router(attention_router)
 app.include_router(matches_router)
+app.include_router(forensics_router)
 
 FRONTEND_DIR = config.FRONTEND_DIR
 
