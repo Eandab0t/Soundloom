@@ -70,6 +70,13 @@ def _decorate(row) -> dict:
     # Clamped: a progress bar that reads 111% is worse than one that stops
     # at 100, and the counter must never be able to contradict the total.
     d["percent"] = min(round((done / total) * 100, 1), 100.0) if total else 0.0
+    # Four separate facts rather than one derived total. `remaining` is
+    # computed against the snapshotted total, so it shrinks as work lands
+    # and cannot be inflated by the denominator moving underneath it.
+    d["processed"] = d.get("processed_files") or 0
+    d["succeeded"] = d.get("succeeded_files") or 0
+    d["failed"] = d.get("error_count") or 0
+    d["remaining"] = max((d.get("total_files") or 0) - d["processed"], 0)
     d["running"] = (
         d.get("status") == "running"
         and _task is not None and not _task.done()
@@ -153,9 +160,18 @@ async def start(resume: bool = False) -> dict:
                     row["id"], row["last_track_id"])
         return _respond("resumed", await status())
 
+    # Snapshot the denominator ONCE, here, where the job is created.
+    #
+    # Every later read of total_files trusts this value. Recomputing it
+    # mid-job is what let a resume report a smaller total than the run it
+    # was continuing, so the numbers stopped describing one job.
+    work_rows = await fetch_all(_WORK_SQL)
+    total_files, total_bytes = await asyncio.to_thread(
+        _measure_total_blocking, work_rows)
     cur = await execute(
-        "INSERT INTO provenance_backfill (status, started_at, updated_at) "
-        "VALUES ('running', ?, ?)", (_utcnow_iso(), _utcnow_iso()))
+        "INSERT INTO provenance_backfill (status, started_at, total_files, "
+        "bytes_total, updated_at) VALUES ('running', ?, ?, ?, ?)",
+        (_utcnow_iso(), total_files, total_bytes, _utcnow_iso()))
     _control["pause"] = False
     _control["stop"] = False
     _task = asyncio.create_task(_run(cur.lastrowid))
@@ -248,33 +264,38 @@ async def _run(row_id: int) -> None:
     global _task
     try:
         row = await fetch_one(
-            "SELECT last_track_id, processed_files, bytes_processed "
+            "SELECT last_track_id, processed_files, bytes_processed, "
+            "       total_files, bytes_total "
             "  FROM provenance_backfill WHERE id=?", (row_id,))
         # Resume position, read from the row rather than from memory: this
         # is the only cursor that survives the restart the feature exists
         # for.
         cursor = row["last_track_id"] if row else 0
-        done_files = row["processed_files"] if row else 0
-        done_bytes = row["bytes_processed"] if row else 0
 
-        work_rows = await fetch_all(_WORK_SQL)
-        remaining_files, remaining_bytes = await asyncio.to_thread(
-            _measure_total_blocking, work_rows)
+        # The denominator is read, never rebuilt. See start().
+        total_files = (row["total_files"] if row else 0) or 0
+        bytes_total = (row["bytes_total"] if row else 0) or 0
+        if not total_files:
+            # Only reachable for a row created before this fix existed,
+            # which has no snapshot to inherit. Give it one and stop.
+            work_rows = await fetch_all(_WORK_SQL)
+            total_files, bytes_total = await asyncio.to_thread(
+                _measure_total_blocking, work_rows)
+            await execute(
+                "UPDATE provenance_backfill SET total_files=?, bytes_total=?, "
+                "updated_at=? WHERE id=?",
+                (total_files, bytes_total, _utcnow_iso(), row_id))
 
-        # Cumulative, not remaining. _WORK_SQL measures only what is still
-        # un-hashed, which is right for a fresh run and wrong for a resume:
-        # after a crash, `processed_files` already holds the work done
-        # before, so reporting the remainder as the total produced 757/482.
-        # Adding the two makes the bar monotonic across any number of
-        # restarts.
-        total_files = done_files + remaining_files
-        bytes_total = done_bytes + remaining_bytes
-        await execute(
-            "UPDATE provenance_backfill SET total_files=?, bytes_total=?, "
-            "updated_at=? WHERE id=?",
-            (total_files, bytes_total, _utcnow_iso(), row_id))
+        remaining_files = len(await fetch_all(_WORK_SQL))
 
         if remaining_files == 0:
+            # No file this job promised to cover is still unhashed, so the
+            # job is finished even if its own counter has not caught up -
+            # which happens when the last files were hashed between a crash
+            # and this restart. Reconcile, or a completed run sits at
+            # 753/766 for ever, which is exactly the lie the freeze was
+            # meant to remove.
+            await _reconcile_complete(row_id, total_files, bytes_total)
             await _finish(row_id, "complete")
             await _index_unclaimed()
             return
@@ -289,6 +310,10 @@ async def _run(row_id: int) -> None:
 
             rows = await fetch_all(_CHUNK_SQL, (cursor, CHUNK_SIZE))
             if not rows:
+                # The second way a run runs dry. Same reconciliation as
+                # above, because the invariant is about reaching
+                # 'complete', not about which loop got there.
+                await _reconcile_complete(row_id, total_files, bytes_total)
                 await _finish(row_id, "complete")
                 return
 
@@ -318,11 +343,12 @@ async def _run(row_id: int) -> None:
                    SET processed_files = processed_files + ?,
                        bytes_processed = bytes_processed + ?,
                        error_count = error_count + ?,
+                       succeeded_files = succeeded_files + ?,
                        last_track_id = ?, last_path = ?, updated_at = ?
                  WHERE id = ?
                 """,
-                (done_files, done_bytes, errors, cursor, last_path,
-                 _utcnow_iso(), row_id))
+                (done_files, done_bytes, errors, done_files - errors,
+                 cursor, last_path, _utcnow_iso(), row_id))
 
     except asyncio.CancelledError:
         await _finish(row_id, "cancelled", stamp_completion=False)
@@ -394,6 +420,29 @@ async def _index_unclaimed() -> None:
         await content_index.rebuild()
     except Exception as e:  # noqa: BLE001
         logger.warning("Content index rebuild could not start: %s", e)
+
+
+async def _reconcile_complete(row_id: int, total_files: int,
+                              bytes_total: int) -> None:
+    """Settle the counters on the way to 'complete'.
+
+    A run can finish with its own counter behind the total: files hashed
+    between a crash and the restart stop counting as this run's work, so
+    the counter never catches up. Left alone, a *completed* job reports
+    753/766 - a finished task that looks unfinished, which is worse than
+    the drift it replaced.
+
+    Reconciling is honest here precisely because completion means "every
+    file this job promised to cover now has a hash". Whoever hashed the
+    stragglers, the job's promise is kept, and the total it promised
+    against is the total it reports.
+    """
+    await execute(
+        "UPDATE provenance_backfill SET processed_files=?, "
+        "bytes_processed=?, "
+        "succeeded_files=MAX(total_files - error_count, 0), "
+        "updated_at=? WHERE id=?",
+        (total_files, bytes_total, _utcnow_iso(), row_id))
 
 
 async def _finish(row_id: int, status: str, stamp_completion: bool = True) -> None:

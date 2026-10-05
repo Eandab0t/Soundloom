@@ -160,14 +160,27 @@ async def _run() -> None:
 
 
 async def find_moves() -> list[dict]:
-    """Missing tracks whose exact content is indexed elsewhere.
+    """Missing tracks whose exact content exists somewhere else.
 
     A join, not a search: only an identical SHA-256 can appear here, so
     every row returned is proof rather than a lead. A missing track with
-    no recorded hash simply cannot match, and is absent from the result
-    rather than guessed at.
+    no recorded hash cannot match, and is absent from the result rather
+    than guessed at.
+
+    **Two places a file can turn up, and the distinction matters.** A file
+    can be sitting unclaimed, which `library_content` holds. Or it can
+    have been indexed as a track of its own - which is what the scanner
+    does to anything new inside the library, and so is what actually
+    happens when a file is tidied out of its Album folder. That second
+    case used to be excluded outright, which meant the most ordinary kind
+    of move was the one kind never reported.
+
+    Both are proof, so both are reported. `relinkable` says whether the
+    path is free: pointing a row at an unclaimed file is safe, while
+    pointing two rows at one file would make a duplicate look like a
+    repair. That is a judgement for the person, not this function.
     """
-    rows = await fetch_all(
+    unclaimed = await fetch_all(
         """
         SELECT t.id AS track_id, t.title AS title, t.artist AS artist,
                t.file_path AS expected_path, a.sha256 AS sha256,
@@ -186,7 +199,45 @@ async def find_moves() -> list[dict]:
          ORDER BY t.artist, t.title
         """
     )
-    return [dict(r) for r in rows]
+
+    claimed = await fetch_all(
+        """
+        SELECT t.id AS track_id, t.title AS title, t.artist AS artist,
+               t.file_path AS expected_path, a.sha256 AS sha256,
+               x.file_path AS discovered_path,
+               COALESCE(x.file_size, 0) AS file_size,
+               x.id AS claimed_by_track_id, x.title AS claimed_by_title
+          FROM tracks t
+          JOIN acquisition a
+            ON a.track_id = t.id AND a.sha256 != ''
+                 AND a.id = (SELECT MAX(b.id) FROM acquisition b
+                              WHERE b.track_id = t.id)
+          JOIN acquisition a2
+            ON a2.sha256 = a.sha256 AND a2.track_id != t.id
+                 AND a2.id = (SELECT MAX(b2.id) FROM acquisition b2
+                               WHERE b2.track_id = a2.track_id)
+          JOIN tracks x
+            ON x.id = a2.track_id
+         WHERE t.file_status = 'missing'
+           AND x.file_status = 'present'
+           AND x.file_path != t.file_path
+         ORDER BY t.artist, t.title
+        """
+    )
+
+    out: list[dict] = []
+    for r in unclaimed:
+        d = dict(r)
+        d["relinkable"] = True
+        d["claimed_by_track_id"] = None
+        d["claimed_by_title"] = None
+        out.append(d)
+    for r in claimed:
+        d = dict(r)
+        d["relinkable"] = False
+        out.append(d)
+    out.sort(key=lambda d: (d["artist"] or "", d["title"] or ""))
+    return out
 
 
 async def shutdown() -> None:

@@ -271,3 +271,49 @@ class TestMoveSuggestions:
             assert moves[0]["discovered_path"] == moved
         finally:
             await close_db()
+
+
+class TestDeepReconcileWhenNothingIsUnclaimed:
+    """A tidy library must still reconcile.
+
+    The early exit that skipped hashing returned two values where three
+    were expected, so a deep reconcile over a library with no unclaimed
+    files raised ValueError rather than reporting counts. The real library
+    has 825 unclaimed files and never saw it; a well-organised one would,
+    and the absence of unclaimed files is exactly when it triggers.
+    """
+
+    async def test_missing_survive_an_empty_candidate_set(self, env):
+        from backend.services import scanner
+
+        await init_db()
+        try:
+            await _track(_write(env / "only.mp3", b"the one file"))
+            # The row points at a path that was never written. Writing the
+            # file would make it *unclaimed*, which is the opposite of the
+            # condition under test and silently skips the branch entirely.
+            gone = await _track(env / "gone.mp3", status="missing")
+            digest = _sha(b"never on disk")
+            await execute(
+                "INSERT INTO acquisition (track_id, file_path, sha256, "
+                "source, file_size) VALUES (?,?,?,'download',?)",
+                (gone, "somewhere-else.mp3", digest, 13))
+
+            # `sha256` lives on acquisition, not on tracks - a track only
+            # has content identity if something recorded one.
+            rows = await fetch_all(
+                "SELECT id, file_path FROM tracks ORDER BY id")
+            on_disk = {rows[0]["id"]: True, rows[1]["id"]: False}
+            missing = [{"id": gone, "file_path": rows[1]["file_path"],
+                        "sha256": digest}]
+            present = [{"id": rows[0]["id"]}]
+
+            pairs, still_missing, back_present = await scanner._find_moved(
+                missing, present, rows, on_disk, env)
+
+            assert pairs == [], "nothing unclaimed means nothing moved"
+            assert [m["id"] for m in still_missing] == [gone], \
+                "the missing list must survive unchanged"
+            assert back_present == present
+        finally:
+            await close_db()

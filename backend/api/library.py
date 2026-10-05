@@ -346,8 +346,12 @@ async def track_provenance(track_id: int):
     acquisition table has no row for this track, which is exactly the
     situation a rotated log line could never reveal.
     """
+    # `archived_reason` is written on archive and cleared on unarchive,
+    # but until now no query selected it, so the one screen that should
+    # explain an archived row had nothing to explain it with.
     track = await fetch_one(
-        "SELECT id, file_path, file_status, library_status, file_size "
+        "SELECT id, file_path, file_status, library_status, file_size, "
+        "       archived_reason "
         "FROM tracks WHERE id = ?", (track_id,))
     if not track:
         raise HTTPException(404, "Track not found")

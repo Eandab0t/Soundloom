@@ -375,6 +375,150 @@ class TestControl:
             await close_db()
 
 
+class TestFrozenDenominator:
+    """The total is a snapshot, not a running guess.
+
+    It used to be recomputed on every resume as `done + still-unhashed`.
+    The second term shrinks on its own - a file hashed between a crash and
+    the restart stops counting as remaining - so the denominator moved
+    under a running job, and a resume reported 753 of a total that had
+    been 766. Everything here pins the replacement: written once, read
+    forever.
+    """
+
+    async def test_the_total_is_written_at_creation(self, env):
+        await init_db()
+        try:
+            await _library(env, 4)
+            await backfill.start()
+            await backfill.wait_idle()
+
+            run = await backfill.status()
+            assert run["total_files"] == 4, "snapshotted before any work"
+            assert run["processed"] == 4
+            assert run["remaining"] == 0
+        finally:
+            await close_db()
+
+    async def test_the_total_survives_files_being_hashed_elsewhere(self, env):
+        """The real bug: stragglers land between the crash and the resume.
+
+        Two files were already hashed when this run last stopped. One more
+        is hashed by something else entirely - a download job, a second
+        machine - before the resume. The total must not notice, because the
+        total is this job's own denominator, not a live census.
+        """
+        await init_db()
+        try:
+            made = await _library(env, 5)
+            all_bytes = sum(len(p) for _, _, p in made)
+
+            await execute(
+                "INSERT INTO provenance_backfill "
+                " (status, total_files, processed_files, bytes_total, "
+                "  bytes_processed, last_track_id) "
+                "VALUES ('interrupted', 5, 2, ?, 0, ?)",
+                (all_bytes, made[1][0]))
+            for tid, path, payload in made[:2]:
+                await execute(
+                    "INSERT INTO acquisition (track_id, file_path, sha256, "
+                    "source, file_size) VALUES (?,?,?,'backfill',?)",
+                    (tid, path, _sha(payload), len(payload)))
+
+            # Something outside this job finishes one more file.
+            tid, path, payload = made[2]
+            await execute(
+                "INSERT INTO acquisition (track_id, file_path, sha256, "
+                "source, file_size) VALUES (?,?,?,'download',?)",
+                (tid, path, _sha(payload), len(payload)))
+
+            await backfill.start(resume=True)
+            await backfill.wait_idle()
+
+            run = await backfill.status()
+            # The regression: done(2) + still-unhashed(2) is 4, so the old
+            # recompute reports a total smaller than the job it was
+            # continuing. The snapshot was written before the crash and is
+            # read, not rebuilt.
+            assert run["total_files"] == 5, \
+                "the denominator is this job's, not the library's"
+            assert run["status"] == "complete"
+            # Completion reconciles the counter to the promise, so a
+            # finished run reads full rather than 4/5 - the job's goal was
+            # that all five files have a hash, and they do.
+            assert run["processed"] == 5
+            assert run["succeeded"] == 5
+            assert run["failed"] == 0
+            assert run["remaining"] == 0
+            assert run["percent"] == 100.0
+        finally:
+            await close_db()
+
+    async def test_a_completed_run_always_reads_as_full(self, env):
+        """Reaching 'complete' has to mean the bar reaches 100%.
+
+        Same setup as above, so the counter lands one behind the total.
+        Without reconciliation the job finishes displaying 5/6, which is
+        the exact lie the freeze was meant to remove.
+        """
+        await init_db()
+        try:
+            made = await _library(env, 4)
+            all_bytes = sum(len(p) for _, _, p in made)
+
+            await execute(
+                "INSERT INTO provenance_backfill "
+                " (status, total_files, processed_files, bytes_total, "
+                "  bytes_processed, last_track_id) "
+                "VALUES ('interrupted', 4, 1, ?, 0, ?)",
+                (all_bytes, made[0][0]))
+            for tid, path, payload in made[:2]:
+                await execute(
+                    "INSERT INTO acquisition (track_id, file_path, sha256, "
+                    "source, file_size) VALUES (?,?,?,'backfill',?)",
+                    (tid, path, _sha(payload), len(payload)))
+
+            await backfill.start(resume=True)
+            await backfill.wait_idle()
+
+            run = await backfill.status()
+            assert run["status"] == "complete"
+            assert run["processed"] == run["total_files"] == 4, \
+                "a finished job must not display as unfinished"
+            assert run["remaining"] == 0
+            assert run["percent"] == 100.0
+
+            rows = await fetch_all("SELECT * FROM acquisition")
+            assert len(rows) == 4
+            assert all(r["sha256"] for r in rows)
+        finally:
+            await close_db()
+
+    async def test_successes_and_failures_are_counted_separately(self, env):
+        """A file that exists but cannot be read is processed AND failed.
+
+        Collapsing the two into one number is how a run ends up claiming
+        it hashed 700 files when 3 of them were never identified.
+        """
+        await init_db()
+        try:
+            await _library(env, 2)
+            # Present to the library, absent from disk.
+            await _mk_track(env / "not-really-here.mp3", size=10)
+
+            await backfill.start()
+            await backfill.wait_idle()
+
+            run = await backfill.status()
+            assert run["processed"] == 3
+            assert run["succeeded"] == 2
+            assert run["failed"] == 1
+            assert run["total_files"] == 3
+            assert run["remaining"] == 0
+        finally:
+            await close_db()
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -393,12 +537,18 @@ class TestResumeCoherence:
             made = await _library(env, 5)
 
             # A run that died with two files done and a cursor past them.
+            # The byte figures are the real on-disk sizes: the total is
+            # snapshotted at creation and read at face value now, so a
+            # fixture whose bytes_total disagreed with its own files would
+            # be testing arithmetic rather than the behaviour.
+            done_bytes = sum(len(p) for _, _, p in made[:2])
+            all_bytes = sum(len(p) for _, _, p in made)
             await execute(
                 "INSERT INTO provenance_backfill "
                 " (status, total_files, processed_files, bytes_total, "
                 "  bytes_processed, last_track_id) "
-                "VALUES ('interrupted', 5, 2, 100, 40, ?)",
-                (made[1][0],))
+                "VALUES ('interrupted', 5, 2, ?, ?, ?)",
+                (all_bytes, done_bytes, made[1][0]))
             for tid, path, payload in made[:2]:
                 await execute(
                     "INSERT INTO acquisition (track_id, file_path, sha256, "

@@ -335,7 +335,12 @@ async def _find_moved(missing, present, rows, on_disk, root: Path):
 
     candidates = await asyncio.to_thread(_unclaimed)
     if not candidates:
-        return [], present
+        # Nothing unclaimed means nothing to compare a digest against, so
+        # nothing can have moved. `missing` comes back unchanged - the
+        # caller unpacks three values and uses the second to keep the
+        # buckets disjoint, so dropping it here raised ValueError instead
+        # of returning counts.
+        return [], missing, present
 
     logger.info(
         "Deep reconcile: hashing %d unclaimed file(s) to look for moved tracks",

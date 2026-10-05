@@ -336,7 +336,27 @@ MIGRATIONS: list[Migration] = [
             ON library_content(digest);
         """,
     ),
-
+    Migration(
+        version=14,
+        name="backfill_progress_counters",
+        # Snapshot the denominator once; count outcomes separately.
+        #
+        # `total_files` used to be recomputed on every resume as
+        # `done + still-unhashed`, and the second term shrinks on its own:
+        # a file hashed between the crash and the restart stops counting
+        # as remaining, so the denominator moved under a running job and a
+        # resume reported 753 of a total that had been 766. The total is
+        # now written when the job is created and only ever read.
+        #
+        # `succeeded_files` is stored rather than derived, because
+        # processed and succeeded are different facts: a file that exists
+        # but cannot be read is processed AND failed, and the gap between
+        # those two numbers is what a user actually needs to see.
+        sql="""
+        ALTER TABLE provenance_backfill
+            ADD COLUMN succeeded_files INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
 ]
 
 
