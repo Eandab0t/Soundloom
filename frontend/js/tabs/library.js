@@ -154,7 +154,9 @@ export const Library = {
       const move = this._moves[t.id];
       // Proof beats a prompt. With an identical digest on disk, restoring
       // is the obvious action and Locate is the fallback, not the reverse.
-      const primary = move
+      // Only an *unclaimed* path offers Relink: pointing two rows at one
+      // file would manufacture the duplicate instead of fixing it.
+      const primary = move && move.relinkable !== false
         ? `<button class="btn xs lib-restore" type="button" data-restore-move="${t.id}"`
           + ` title="Same SHA-256 found at ${esc(move.discovered_path)}">`
           + `Restore this file</button>`
@@ -218,37 +220,128 @@ export const Library = {
     if (existing) { existing.remove(); return; }
     try {
       const d = await API.get(`/api/library/tracks/${t.id}/provenance`);
-      const acq = d.acquisitions[0];
       const tr = document.createElement('tr');
       tr.className = 'lib-detail-row';
       const cell = document.createElement('td');
       cell.colSpan = 9;
-      const parts = [`<b>${d.never_acquired ? 'Never acquired' : 'Provenance'}</b>`];
-      if (acq) {
-        if (acq.sha256) {
-          parts.push(`SHA-256 <code>${esc(acq.sha256.slice(0, 24))}…</code>`);
-          parts.push(fmtSize(acq.file_size));
-        } else {
-          parts.push('no content hash recorded');
-        }
-        if (acq.completed_at) parts.push(`recorded ${esc(acq.completed_at.slice(0, 19))}`);
-        if (acq.source_url) parts.push(`from ${esc(acq.source_url)}`);
-        if (acq.job_id) parts.push(`job ${acq.job_id}`);
-        if (acq.source === 'backfill') parts.push('(added by backfill, not a download)');
-      } else {
-        parts.push('Indexed before Soundloom recorded where files came from, so ' +
-          'there is no record. It cannot be identified by content - Locate ' +
-          'will need a path.');
-      }
-      if (d.operations.length) {
-        parts.push(`${d.operations.length} journal entr${d.operations.length === 1 ? 'y' : 'ies'}`);
-      }
-      cell.innerHTML = parts.join(' · ');
+      cell.innerHTML = this.provenanceHtml(d, this._moves[t.id], t);
       tr.appendChild(cell);
       row.after(tr);
+      const relink = cell.querySelector('[data-relink]');
+      if (relink) {
+        relink.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.applyLocated(t, this._moves[t.id].discovered_path);
+        });
+      }
     } catch (e) {
       showToast('Could not load provenance: ' + e.message, 'error');
     }
+  },
+
+  /** A digest, abbreviated head and tail: enough to compare by eye. */
+  _shortSha(sha) {
+    if (!sha) return '<em>none recorded</em>';
+    return `<code>${esc(sha.slice(0, 4))}\u2026${esc(sha.slice(-4))}</code>`;
+  },
+
+  _provRow(label, value) {
+    return `<div class="prov-row"><span class="prov-k">${esc(label)}</span>` +
+           `<span class="prov-v">${value}</span></div>`;
+  },
+
+  _provHead(text, cls) {
+    return `<div class="prov-head ${cls || ''}">${esc(text)}</div>`;
+  },
+
+  /**
+   * What is actually known about this track, as labelled facts.
+   *
+   * The order is the order of how much can be done about it. A proven
+   * move leads, because it is the only state with a fix attached. A track
+   * with no acquisition record is labelled Unknown rather than Missing:
+   * nothing has been established about it, and calling it missing claims
+   * more than the evidence supports.
+   */
+  provenanceHtml(d, move, t) {
+    const track = d.track || {};
+    const acq = d.acquisitions[0];
+
+    if (move) {
+      const claim = move.claimed_by_track_id
+        ? `<div class="prov-warn">That file is already in the library as ` +
+          `another track${move.claimed_by_title
+            ? ` (<b>${esc(move.claimed_by_title)}</b>)` : ''}, so relinking ` +
+          `here would give two rows the same file. The bytes are provably ` +
+          `the same track - this is a duplicate to resolve, not a missing ` +
+          `file to restore.</div>`
+        : '';
+      const relink = move.relinkable === false ? '' :
+        `<div class="prov-actions">` +
+        `<button class="btn xs" type="button" data-relink="${t.id}">` +
+        `Relink to this file</button></div>`;
+      return this._provHead('Moved', 'prov-moved') +
+        this._provRow('Expected', `<code>${esc(track.file_path || '')}</code>`) +
+        this._provRow('Found', `<code>${esc(move.discovered_path || '')}</code>`) +
+        this._provRow('Proof',
+          `<span class="prov-exact">Exact SHA-256 match</span> ` +
+          this._shortSha(move.sha256)) + claim + relink;
+    }
+
+    let head, cls = '';
+    if (track.library_status === 'archived') {
+      head = this._provHead('Archived', 'prov-archived');
+      cls = 'prov-archived';
+    } else if (d.never_acquired) {
+      head = this._provHead('Unknown', 'prov-unknown');
+    } else {
+      head = this._provHead('Provenance', '');
+    }
+
+    let html = head;
+    html += this._provRow('Last known',
+      track.file_path ? `<code>${esc(track.file_path)}</code>` : '<em>unknown</em>');
+
+    if (track.library_status === 'archived') {
+      html += this._provRow('Reason',
+        track.archived_reason ? esc(track.archived_reason)
+                              : '<em>no reason recorded</em>');
+    }
+
+    if (acq) {
+      const when = acq.completed_at
+        ? esc(String(acq.completed_at).slice(0, 19).replace('T', ' '))
+        : '<em>unknown</em>';
+      html += this._provRow('Acquired', `${when} \u00b7 ${esc(acq.source || 'unknown')}`);
+      html += this._provRow('SHA-256', this._shortSha(acq.sha256));
+      if (acq.sha256 && acq.file_size) {
+        html += this._provRow('Size', fmtSize(acq.file_size));
+      }
+      if (acq.source_url) {
+        html += this._provRow('From', `<code>${esc(acq.source_url)}</code>`);
+      }
+      if (acq.job_id) html += this._provRow('Job', esc(String(acq.job_id)));
+      if (acq.source === 'backfill') {
+        html += this._provRow('Note',
+          'Added by backfill \u2014 this file was already in the library, ' +
+          'so this is a record of where it is, not of where it came from.');
+      }
+      if (!acq.sha256) {
+        html += `<div class="prov-warn">Exists, but its content could not ` +
+                `be read, so it cannot be identified by hash.</div>`;
+      }
+    } else {
+      html += `<div class="prov-warn">No acquisition record: this track was ` +
+              `indexed before Soundloom recorded where files came from. ` +
+              `There is no digest, so this file cannot be identified by ` +
+              `content \u2014 Locate will need a path.</div>`;
+    }
+
+    if (d.operations.length) {
+      html += this._provRow('Journal',
+        `${d.operations.length} entr${d.operations.length === 1 ? 'y' : 'ies'}`);
+    }
+    return html;
   },
 
   // --- provenance backfill --------------------------------------------

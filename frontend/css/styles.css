@@ -931,6 +931,41 @@ tr.is-missing { opacity: 0.72; }
   background: var(--bg); border-radius: 5px;
 }
 
+/* --- provenance detail row --------------------------------------------- */
+/* A labelled block rather than a run-on sentence: the reader is asking
+   three separate questions - where was it, where did it come from, and can
+   I prove this is the same file - and a ` · `-joined line answers none of
+   them legibly once two paths and a digest are in it. */
+.lib-detail .prov-head {
+  font-size: 12px; font-weight: 650; letter-spacing: 0.03em;
+  text-transform: uppercase; margin-bottom: 6px;
+  color: var(--text-2);
+}
+.lib-detail .prov-head.prov-moved    { color: var(--accent); }
+.lib-detail .prov-head.prov-unknown  { color: var(--text-3); }
+.lib-detail .prov-row {
+  display: grid; grid-template-columns: 84px 1fr; gap: 10px;
+  padding: 2px 0; align-items: baseline;
+}
+.lib-detail .prov-k {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-3); text-align: right;
+}
+.lib-detail .prov-v {
+  font-size: 12.5px; color: var(--text); word-break: break-all;
+}
+.lib-detail .prov-v code { font-size: 12px; color: var(--text-2); }
+.lib-detail .prov-exact {
+  color: var(--accent-strong); font-weight: 600;
+}
+.lib-detail .prov-warn {
+  margin-top: 7px; padding: 7px 10px; font-size: 12px; line-height: 1.5;
+  color: var(--text-2);
+  background: var(--bg); border: 1px solid var(--border);
+  border-left: 2px solid var(--accent); border-radius: 5px;
+}
+.lib-detail .prov-actions { margin-top: 9px; }
+
 /* --- Provenance backfill ------------------------------------------------ */
 
 .bf-panel {
