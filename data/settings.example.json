@@ -8,6 +8,8 @@
   "max_concurrent_downloads": 3,
   "max_retries": 3,
   "match_threshold": 70,
+  "auto_resume_operations": false,
+  "verify_library_on_startup": true,
   "watch_enabled": true,
   "watched_check_interval": 3600,
   "watch_backfill_days": 30,
