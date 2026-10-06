@@ -104,8 +104,10 @@ Both are in `data/settings.example.json`, and both default to the safe answer:
    already have and it is copied into the library, never moved.
 3. **Watch the queue.** Queue tab, or `GET /api/queue`. Each job runs
    resolve → match → download → convert → tag → organize → index.
-4. **Tidy.** Identify fixes metadata against MusicBrainz; Fix resolves duplicate
-   artists; Attention lists what needs a decision; Metadata edits tags.
+4. **Tidy.** The Identify tab fixes metadata against MusicBrainz, Edit Tags
+   edits tags directly, and Needs Attention lists what needs a decision. A
+   duplicate-artist check appears as a banner on the Library tab when there is
+   something to act on.
 5. **Recover.** If a file moves or disappears, the Library tab offers Find
    (exact SHA-256 content match) and Locate (point a track at a path you found).
 
