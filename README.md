@@ -88,7 +88,7 @@ Both are in `data/settings.example.json`, and both default to the safe answer:
   at the next start. It is off because a track that already reached the library
   is cheap to recover, while re-downloading one costs bandwidth and time. With
   it off, `GET /api/operations/interrupted` lists what was left half-done and
-  `POST /api/operations/{id}/retry` finishes it when you say so.
+  `POST /api/operations/{op_id}/retry` finishes it when you say so.
 
 ## The basic workflow
 
