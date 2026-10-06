@@ -15,7 +15,7 @@ per-source adapters, and keep metadata and covers clean.
 - **Playlist Hub** — import playlists (Spotify, Deezer, iTunes XML, M3U, CSV)
   and export to M3U8, CSV, iTunes XML, JSON, Spotify, or SoundCloud
 - **Library forensics** — an append-only log records when a tracked file goes
-  missing, is renamed in place, or changes content
+  missing or its content changes, without editing your library
 
 Everything is local. Your music stays on your disk, the database is one SQLite
 file in `data/`, and the server binds to `127.0.0.1` only.
