@@ -2,7 +2,7 @@
   "theme": "dark",
   "library_path": "C:/Users/<you>/Music",
   "download_path": "C:/Users/<you>/Downloads/Music",
-  "folder_template": "{album_artist}\\{album}\\{track_number} - {title}.{format}",
+  "folder_template": "{album_artist}\{album}\{track_number} - {title}.{format}",
   "default_format": "mp3",
   "default_quality": "balanced",
   "max_concurrent_downloads": 3,

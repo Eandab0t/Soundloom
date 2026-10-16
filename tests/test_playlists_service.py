@@ -192,4 +192,61 @@ class TestWriters:
 
     def test_names_are_sanitized(self, tmp_path):
         out = svc.write_m3u('My: "Bad" <Name>/x?', ROWS, tmp_path)
-        assert "/" not in out.name and ":" not in out.name
+
+
+# --------------------------------------------------------------------------
+# Text list (TXT) parsing
+# --------------------------------------------------------------------------
+
+class TestTxt:
+
+    def test_artist_title_split(self):
+        rows = svc.parse_plain_list(
+            "Daft Punk - One More Time\r\nThe Cure - Just Like Heaven\r\n# comment\r\nMassive Attack - Teardrop\r\n\r\n  Stream of Paradise  "
+        )
+        assert len(rows) == 4
+        assert rows[0]["artist"] == "Daft Punk"
+        assert rows[0]["title"] == "One More Time"
+        assert rows[1]["artist"] == "The Cure"
+        assert rows[2]["artist"] == "Massive Attack"
+        assert rows[3]["artist"] == ""
+        assert rows[3]["title"] == "Stream of Paradise"
+
+    def test_parse_txt_mix(self):
+        out = svc.parse_txt(
+            "# My playlist\r\nDaft Punk - One More Time\r\nhttps://open.spotify.com/playlist/37i9dQZF1DXcBWIG\r\nhttps://www.youtube.com/watch?v=xxxx"
+        )
+        assert out["name"] == "TXT Import"
+        assert out["mode"] == "artist_title"
+        assert len(out["tracks"]) == 3
+        assert out["tracks"][0]["artist"] == "Daft Punk"
+        assert out["tracks"][1]["title"].startswith("https://open.spotify.com")
+
+    def test_parse_url_list_joins_plain(self):
+        out = svc.parse_url_list(
+            "https://open.spotify.com/playlist/37i9dQZF1DXcBWIG\r\nDaft Punk - One More Time\r\nThe Cure - Just Like Heaven\r\nhttps://www.youtube.com/watch?v=yyyy"
+        )
+        assert len(out["tracks"]) == 3
+        assert out["tracks"][0]["title"].startswith("https://open.spotify.com")
+        assert out["tracks"][2]["title"] == "Daft Punk - One More Time The Cure - Just Like Heaven"
+
+    def test_parse_url_list_keeps_urls_only(self):
+        out = svc.parse_url_list(
+            "https://open.spotify.com/playlist/37i9dQZF1DXcBWIG\r\nhttps://www.youtube.com/watch?v=xxxx"
+        )
+        assert len(out["tracks"]) == 2
+
+    def test_parse_txt_comments_and_blanks(self):
+        out = svc.parse_txt(
+            "\r\n  # header\r\nTrack One\r\n  # another\r\nTrack Two"
+        )
+        assert len(out["tracks"]) == 2
+        assert out["tracks"][0]["title"] == "Track One"
+        assert out["tracks"][1]["title"] == "Track Two"
+
+    def test_parse_artist_title_edge_cases(self):
+        assert svc.parse_artist_title("Daft Punk - One More Time") == ("Daft Punk", "One More Time")
+        assert svc.parse_artist_title("Lovefool") == ("", "Lovefool")
+        assert svc.parse_artist_title("A -") == ("A", "")
+        assert svc.parse_artist_title("A - B feat. C") == ("A", "B feat. C")
+

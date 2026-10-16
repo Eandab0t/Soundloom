@@ -407,7 +407,55 @@ MIGRATIONS: list[Migration] = [
         CREATE INDEX IF NOT EXISTS idx_canary_state ON canary(state);
         """,
     ),
+    Migration(
+        version=16,
+        name="playlist_sync_tables",
+        sql="""
+    CREATE TABLE IF NOT EXISTS playlist_syncs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        source_type TEXT DEFAULT 'spotify',
+        source_ref TEXT DEFAULT '',
+        url TEXT DEFAULT '',
+        auto_sync INTEGER DEFAULT 0,
+        sync_interval INTEGER DEFAULT 0,
+        quality_profile TEXT DEFAULT 'balanced',
+        last_synced TEXT,
+        last_track_ids TEXT DEFAULT '[]',
+        last_error TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL REFERENCES playlist_syncs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL DEFAULT 'add',
+        status TEXT NOT NULL DEFAULT 'pending',
+        started_at TEXT,
+        finished_at TEXT,
+        summary TEXT DEFAULT '{}',
+        error TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_track_mapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL,
+        source_key TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        local_track_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sync_runs_playlist ON sync_runs(playlist_id);
+    CREATE INDEX IF NOT EXISTS idx_sync_tracks_playlist_key
+        ON sync_track_mapping(playlist_id, source_key, source_id);
+    CREATE INDEX IF NOT EXISTS idx_sync_tracks_local
+        ON sync_track_mapping(local_track_id);
+    """
+    ),
 ]
+
 
 
 async def run_migrations(db) -> int:

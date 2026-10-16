@@ -79,6 +79,301 @@ def make_row(title: str = "", artist: str = "", album: str = "",
         "ext_id": (ext_id or "").strip(),
         "ext_source": (ext_source or "").strip(),
     }
+''
+
+def parse_artist_title(raw: str) -> tuple[str, str]:
+
+    """Split a 'Artist - Title' (or 'Title') line into (artist, title).
+
+
+
+    Accepts 'A - T', 'A - T (feat. B)', 'A - T feat. B', ' - T', 'T' and
+
+    'A -'. The first ' - ' or ' -' separator wins; a bare title has no
+
+    artist.  Everything after the separator belongs to the title.
+
+    """
+
+    raw = (raw or "").strip()
+
+    if not raw:
+
+        return "", ""
+
+    if " - " in raw:
+
+        artist, _, title = raw.partition(" - ")
+
+    elif " -" in raw:
+
+        artist, _, title = raw.partition(" -")
+
+    else:
+
+        return "", raw
+
+    return (artist or "").strip(), (title or "").strip()
+
+
+
+
+
+def parse_plain_list(raw: str) -> list[dict]:
+
+    """Parse a free-form song list into track rows.
+
+
+
+    Each non-empty, non-comment line becomes one row.  'Artist - Title'
+
+    lines split into artist/title; anything else becomes a row with an
+
+    empty artist and the full line as the title.
+
+    """
+
+    rows: list[dict] = []
+
+    for ln in raw.splitlines():
+
+        line = ln.strip()
+
+        if not line or line.startswith("#"):
+
+            continue
+
+        artist, title = parse_artist_title(line)
+
+        rows.append(make_row(title=title, artist=artist))
+
+    return rows
+
+
+
+
+
+def _is_url_candidate(text: str) -> bool:
+
+    """Heuristic: a line that points at a real resource, not a song title."""
+
+    t = text.strip()
+
+    return any(
+
+        t.lower().startswith(prefix)
+
+        for prefix in (
+
+            "http://",
+
+            "https://",
+
+            "spotify:",
+
+            "deezer:",
+
+            "yt:",
+
+            "soundcloud:",
+
+            "bandcamp:",
+
+            "vimeo:",
+
+        )
+
+    )
+
+
+
+
+
+def _split_url_candidates(lines: list[str]) -> tuple[list[str], list[str]]:
+
+    """Separate URL-looking lines from plain-text track lines."""
+
+    urls: list[str] = []
+
+    other: list[str] = []
+
+    for ln in lines:
+
+        if _is_url_candidate(ln):
+
+            urls.append(ln)
+
+        else:
+
+            other.append(ln)
+
+    return urls, other
+
+
+
+
+
+def _join_plain_lines(lines: list[str]) -> list[dict]:
+
+    """Reassemble title/artist pairs split across consecutive lines.
+
+
+
+    'Artist - Title' can be wrapped onto two lines, e.g.::
+
+
+
+        The Cardigans - Lovefool
+
+        (Live)
+
+
+
+    The first line is the title (no ' - ' or ' -' still present), the second is
+
+    part of the title.  We join consecutive non-URL lines into one title.
+
+    """
+
+    rows: list[dict] = []
+
+    pending_title = None
+
+    for ln in lines:
+
+        if _is_url_candidate(ln):
+
+            if pending_title is not None:
+
+                rows.append(make_row(title=pending_title, artist=""))
+
+                pending_title = None
+
+            rows.append(make_row(title=ln.strip(), artist=""))
+
+        else:
+
+            if pending_title is None:
+
+                pending_title = ln.strip()
+
+            else:
+
+                pending_title = pending_title + " " + ln.strip()
+
+    if pending_title is not None:
+
+        rows.append(make_row(title=pending_title, artist=""))
+
+    return rows
+
+
+
+
+
+def parse_txt(raw: str, name_hint: str = "") -> dict:
+
+    """Parse a free-form text list into track rows.
+
+
+
+    Supported per line:
+
+      - URLs        (http(s)://, spotify:, deezer:, bare ids)
+
+      - 'Artist - Title'  (one track per line, e.g. 'Daft Punk - One More Time')
+
+      - 'Title'     (plain text list, artist left blank)
+
+
+
+    Comment lines start with '#'.  This matches the Soundiiz-style plain-text
+
+    import: one item per line, 'Artist - Title' supported.
+
+    """
+
+    rows: list[dict] = []
+
+    mode: str = "plain"
+
+    for ln in raw.splitlines():
+
+        line = ln.strip()
+
+        if not line or line.startswith("#"):
+
+            continue
+
+        kind = _line_kind(line)
+
+        if mode == "plain" and kind in ("artist_title", "url"):
+
+            mode = kind
+
+        if kind == "comment":
+
+            continue
+
+        if kind == "url":
+
+            rows.append(make_row(title=line, artist=""))
+
+        elif kind == "artist_title":
+
+            artist, title = parse_artist_title(line)
+
+            rows.append(make_row(title=title, artist=artist))
+
+        else:
+
+            rows.append(make_row(title=line, artist=""))
+
+    return {"name": name_hint or "TXT Import", "mode": mode, "tracks": rows}
+
+
+
+
+
+def parse_url_list(raw: str, name_hint: str = "") -> dict:
+
+    """Parse a list of URLs plus optional 'Artist - Title' plain lines.
+
+
+
+    Differs from parse_txt in that URL-looking lines are kept as titles
+
+    (not split into artist/title); the matcher decides.  Plain-text lines
+
+    that could be title/artist pairs are joined and given to the resolver.
+
+    """
+
+    lines = [
+
+        ln.strip()
+
+        for ln in raw.splitlines()
+
+        if ln.strip() and not ln.strip().startswith("#")
+
+    ]
+
+    urls, other = _split_url_candidates(lines)
+
+    rows: list[dict] = []
+
+    for u in urls:
+
+        rows.append(make_row(title=u, artist=""))
+
+    if other:
+
+        rows.extend(_join_plain_lines(other))
+
+    return {"name": name_hint or "URL Import", "tracks": rows}
+
+''
 
 
 # --------------------------------------------------------------------------
@@ -497,6 +792,26 @@ async def create_spotify_playlist(name: str, rows: list[dict], description: str 
         "snapshot": snapshot,
     }
 
+def _line_kind(raw: str) -> str:
+    """Classify one trimmed, non-comment line as 'url', 'artist_title' or 'plain'."""
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        return "comment"
+    if " - " in line or " -" in line:
+        artist, title = parse_artist_title(line)
+        if artist and title:
+            return "artist_title"
+        if not artist and title:
+            return "plain"
+        # Separator present but nothing left on either side; keep as url.
+    if line.lower().startswith(("http://", "https://", "spotify:", "deezer:")):
+        return "url"
+    if len(line) <= 2000:
+        return "url"
+    # Lines that look like identifiers but are not URLs are plain text tracks.
+    return "plain"
+
+
 
 async def _spotify_create_playlist(name: str, token: str, user_id: str, description: str) -> dict:
     async with aiohttp.ClientSession() as session:
@@ -671,3 +986,4 @@ async def enqueue_missing(playlist_id: int, limit: int = 100) -> dict:
         "already_queued": skipped_queued,
         "unmatched_total": len(rows),
     }
+
