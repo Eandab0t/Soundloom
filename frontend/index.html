@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Soundloom</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/img/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/img/favicon-180x180.png">
   <link rel="icon" type="image/svg+xml" href="/static/img/logo.svg">
   <link rel="stylesheet" href="/static/css/styles.css">
 </head>
@@ -13,7 +16,7 @@
     <!-- ============ SIDEBAR ============ -->
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-mark" src="/static/img/logo.svg" alt="" width="30" height="30">
+        <img class="brand-mark" src="/static/img/logo.png" alt="" width="30" height="30">
         <div class="brand-text">
           <span class="brand-name">Soundloom</span>
           <span class="brand-sub">library weaver</span>
@@ -21,51 +24,83 @@
       </div>
 
       <nav class="nav">
-        <a href="#library" class="nav-item active" data-tab="library">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-          <span>Library</span>
-        </a>
-        <a href="#sync" class="nav-item" data-tab="sync">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-          <span>Sync</span>
-          <span class="badge" id="sync-badge" style="display:none">0</span>
-        </a>
-        <a href="#playlists" class="nav-item" data-tab="playlists">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M3 6h13"/><path d="M3 12h13"/><path d="M3 18h9"/><path d="m16 15 5 3-5 3z"/></svg>
-          <span>Playlists</span>
-        </a>
-        <a href="#watch" class="nav-item" data-tab="watch">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-          <span>Watch</span>
-          <span class="badge" id="watch-badge" style="display:none">0</span>
-        </a>
-        <a href="#add" class="nav-item" data-tab="add">
-          <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
-          <span>Add Music</span>
-        </a>
-        <a href="#attention" class="nav-item" data-tab="attention">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-          <span>Needs Attention</span>
-          <span class="badge" id="attention-badge" style="display:none">0</span>
-        </a>
-        <a href="#queue" class="nav-item" data-tab="queue">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v14"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
-          <span>Queue</span>
-          <span class="badge" id="queue-badge" style="display:none">0</span>
-        </a>
-        <a href="#identify" class="nav-item" data-tab="identify">
-          <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          <span>Identify</span>
-          <span class="badge" id="identify-badge" style="display:none">0</span>
-        </a>
-        <a href="#metadata" class="nav-item" data-tab="metadata">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          <span>Edit Tags</span>
-        </a>
-        <a href="#convert" class="nav-item" data-tab="convert">
-          <svg class="nav-icon" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
-          <span>Convert</span>
-        </a>
+        <!-- Your Library -->
+        <div class="nav-section">
+          <span class="nav-section-label">Your library</span>
+          <a href="#library" class="nav-item active" data-tab="library">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>Library</span>
+          </a>
+          <a href="#queue" class="nav-item" data-tab="queue">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M12 2v14"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+            <span>Queue</span>
+            <span class="badge" id="queue-badge" style="display:none">0</span>
+          </a>
+          <a href="#attention" class="nav-item" data-tab="attention">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <span>Needs Attention</span>
+            <span class="badge" id="attention-badge" style="display:none">0</span>
+          </a>
+        </div>
+
+        <!-- Acquire Music -->
+        <div class="nav-section">
+          <span class="nav-section-label">Acquire music</span>
+          <a href="#add" class="nav-item" data-tab="add">
+            <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+            <span>Add Music</span>
+          </a>
+          <a href="#watch" class="nav-item" data-tab="watch">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Watch</span>
+            <span class="badge" id="watch-badge" style="display:none">0</span>
+          </a>
+          <a href="#sync" class="nav-item" data-tab="sync">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+            <span>Sync</span>
+            <span class="badge" id="sync-badge" style="display:none">0</span>
+          </a>
+        </div>
+
+        <!-- Playlists -->
+        <div class="nav-section">
+          <span class="nav-section-label">Playlists</span>
+          <a href="#playlists" class="nav-item" data-tab="playlists">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M3 6h13"/><path d="M3 12h13"/><path d="M3 18h9"/><path d="m16 15 5 3-5 3z"/></svg>
+            <span>Playlists</span>
+          </a>
+        </div>
+
+        <!-- Maintain Library -->
+        <div class="nav-section">
+          <span class="nav-section-label">Maintain library</span>
+          <a href="#identify" class="nav-item" data-tab="identify">
+            <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>Identify</span>
+            <span class="badge" id="identify-badge" style="display:none">0</span>
+          </a>
+          <a href="#metadata" class="nav-item" data-tab="metadata">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            <span>Edit Tags</span>
+          </a>
+          <a href="#convert" class="nav-item" data-tab="convert">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+            <span>Convert</span>
+          </a>
+        </div>
+
+        <!-- Settings & Tools -->
+        <div class="nav-section">
+          <span class="nav-section-label">Settings &amp; tools</span>
+          <a href="#settings" class="nav-item" data-tab="settings">
+            <svg class="nav-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>Settings</span>
+          </a>
+          <a href="#logs" class="nav-item" data-tab="logs">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span>Logs</span>
+          </a>
+        </div>
       </nav>
 
       <div class="sidebar-foot">
@@ -169,10 +204,19 @@
             <button class="icon-btn" id="lib-clear-filters" onclick="Library.clearFilters()" title="Clear filters" style="display:none">✕</button>
           </div>
 
+          <!-- Bulk actions bar (shown when tracks are selected) -->
+          <div class="bulk-bar" id="lib-bulk-bar" style="display:none">
+            <span class="bulk-count" id="lib-bulk-count">0 selected</span>
+            <button class="btn primary sm" onclick="Library.bulkEnqueue()">Add to queue</button>
+            <button class="btn sm" onclick="Library.bulkPlay()">Play selection</button>
+            <button class="btn ghost sm" onclick="Library.bulkSelectNone()">Clear</button>
+          </div>
+
           <div id="lib-tracks-view">
             <div class="table-wrap">
               <table class="table" id="tracks-table">
                 <thead><tr>
+                  <th class="th-select"><input type="checkbox" id="lib-select-all" title="Select all" aria-label="Select all tracks"></th>
                   <th class="th-cover"></th>
                   <th class="sortable" data-sort="title" onclick="Library.sort('title')">Title</th>
                   <th class="sortable" data-sort="artist" onclick="Library.sort('artist')">Artist</th>
@@ -193,8 +237,12 @@
 
           <div class="empty-state" id="lib-empty" style="display:none">
             <svg viewBox="0 0 24 24" class="empty-icon"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            <h3>Nothing here yet</h3>
+            <h3>Your library is empty</h3>
             <p>Run a scan to index your music folder, or add music from the Sync and Add tabs.</p>
+            <div class="input-row" style="justify-content:center; margin-top:16px; gap:8px;">
+              <button class="btn primary" onclick="Library.scan()" style="white-space:nowrap">Scan library folder</button>
+              <button class="btn ghost" onclick="switchToTab('add')">Add music</button>
+            </div>
           </div>
 
           <div id="lib-progress" class="scan-progress" style="display:none">
@@ -424,7 +472,7 @@
           <div id="meta-editor" style="display:none">
             <div class="card">
               <div class="meta-header">
-                <img class="cover lg" id="meta-cover" src="/static/img/logo.svg" alt="">
+                <img class="cover lg" id="meta-cover" src="/static/img/logo.png" alt="">
                 <div>
                   <h3 id="meta-title-display"></h3>
                   <p class="muted" id="meta-artist-display"></p>
@@ -478,7 +526,16 @@
 
         <!-- ======== SETTINGS ======== -->
         <section id="tab-settings" class="tab-panel">
-          <div class="panel-head"><div><h1>Settings</h1></div></div>
+          <div class="panel-head">
+            <div>
+              <h1>Settings</h1>
+              <p class="panel-sub">Configure Soundloom. Use the box below to find a setting quickly.</p>
+            </div>
+            <div class="toolbar">
+              <input type="text" id="settings-search" class="input sm" placeholder="Search settings…" oninput="Settings.filterSettings(this.value)">
+              <span class="muted" id="settings-search-count" style="margin-left:8px; font-size:11px;"></span>
+            </div>
+          </div>
 
           <div class="collapsible" id="settings-general">
             <div class="collapsible-header" onclick="App.toggleCollapse('settings-general')"><span>General</span><span class="arrow">▾</span></div>
@@ -655,6 +712,9 @@
               <svg viewBox="0 0 24 24" id="pb-volume-icon"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
             </button>
             <input type="range" id="pb-volume" class="pb-range pb-volume" min="0" max="1" step="0.01" value="0.9" aria-label="Volume">
+            <button class="icon-btn" id="pb-collapse" type="button" title="Collapse player (C)" aria-label="Collapse player">
+              <svg viewBox="0 0 24 24"><polyline points="7 6 12 11 17 6"/><polyline points="7 18 12 13 17 18"/></svg>
+            </button>
             <button class="icon-btn" id="pb-shortcuts" type="button"
                     data-open-shortcuts title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
@@ -670,7 +730,8 @@
 
       <footer class="statusbar">
         <span id="status-tracks">—</span>
-        <span class="status-dot" id="ws-dot" title="Live connection"></span>
+        <span class="status-dot" id="ws-dot" title="Live connection" aria-label="Connection status"></span>
+        <span id="ws-status" class="muted" style="font-size:11px">Live connection</span>
         <span class="grow"></span>
         <span id="status-queue">Queue idle</span>
       </footer>
@@ -690,6 +751,25 @@
   </div>
 
   <div id="toast-container" class="toast-container"></div>
+
+  <!-- ============ ONBOARDING ============
+       Shown once when Soundloom has no library folder configured yet.
+       Dismissible; never blocks the app. -->
+  <div class="modal-backdrop" id="onboarding-sheet" role="dialog" aria-modal="true"
+       aria-labelledby="onboarding-title" hidden>
+    <div class="modal-card sc-card" style="max-width:560px">
+      <div class="modal-head">
+        <h3 id="onboarding-title">Welcome to Soundloom</h3>
+        <button class="icon-btn" data-close type="button" title="Skip (can be re-opened from Settings)"
+                aria-label="Skip onboarding">&times;</button>
+      </div>
+      <div id="onboarding-body"></div>
+      <div class="sc-foot" style="margin-top:16px; padding-top:12px; border-top:1px solid var(--border); display:flex; gap:8px; justify-content:flex-end">
+        <button class="btn ghost" id="onboarding-skip">Skip</button>
+        <button class="btn primary" id="onboarding-next">Next</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/static/js/main.js"></script>
 </body>

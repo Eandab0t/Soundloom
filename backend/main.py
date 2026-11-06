@@ -44,10 +44,22 @@ setup_logging(config.LOGS_DIR)
 logger = logging.getLogger("soundloom")
 
 _shutdown_task = None
+_shutdown_requested = asyncio.Event()
 
 
 async def _auto_shutdown_watchdog():
-    """Background task: if auto_shutdown enabled and no heartbeat for timeout, kill server."""
+    """Background task: if auto_shutdown enabled and no heartbeat for timeout,
+    initiate a graceful shutdown.
+
+    Replaces the old os._exit(0) hard kill, which skipped every cleanup step
+    (closing the DB, stopping workers, flushing logs). sys.exit(0) in a
+    background asyncio task does not stop the server - SystemExit is caught by
+    asyncio and logged, not propagated to the interpreter. Instead we signal
+    uvicorn with SIGINT, whose handler starts graceful shutdown: the lifespan
+    cleanup after ``yield`` runs (workers stop, DB closes) before the process
+    exits.
+    """
+    import signal
     import time as _time
     while True:
         await asyncio.sleep(5)
@@ -60,8 +72,15 @@ async def _auto_shutdown_watchdog():
                 continue
             idle = _time.time() - last
             if idle > timeout:
-                logger.info(f"No heartbeat for {int(idle)}s (timeout={timeout}s). Shutting down.")
-                os._exit(0)
+                logger.info(
+                    f"No heartbeat for {int(idle)}s (timeout={timeout}s). "
+                    "Shutting down gracefully."
+                )
+                _shutdown_requested.set()
+                # Signal uvicorn to start graceful shutdown. The lifespan
+                # cleanup runs after this, so workers stop and the DB closes.
+                os.kill(os.getpid(), signal.SIGINT)
+                return  # Stop the watchdog; uvicorn's shutdown takes over
         except Exception as e:
             logger.debug(f"Shutdown watchdog error: {e}")
 
@@ -170,6 +189,8 @@ async def lifespan(app: FastAPI):
     yield
     if _shutdown_task:
         _shutdown_task.cancel()
+    if _shutdown_requested.is_set():
+        logger.info("Watchdog-initiated shutdown; running cleanup sequence.")
     await stop_sync_loop()
     await stop_watcher()
     # The observer polls the filesystem and writes rows, so it has to

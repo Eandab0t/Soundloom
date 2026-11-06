@@ -76,9 +76,13 @@ export const Bus = {
 
 function setWsDot(connected) {
   const dot = document.getElementById('ws-dot');
+  const text = document.getElementById('ws-status');
   if (dot) {
     dot.classList.toggle('off', !connected);
     dot.title = connected ? 'Live connection' : 'Reconnecting…';
+  }
+  if (text) {
+    text.textContent = connected ? 'Live connection' : 'Reconnecting…';
   }
 }
 

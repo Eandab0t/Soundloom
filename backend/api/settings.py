@@ -17,7 +17,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .. import config
-from ..validation import validate_folder_template
+from ..errors import ValidationError
+from ..validation import validate_absolute_path, validate_folder_template
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -121,10 +122,10 @@ class SettingsUpdate(BaseModel):
     def _check_path(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        v = v.strip()
-        if v and not v.startswith(("\\\\", "//")) and ":" not in v and "/" not in v:
-            raise ValueError("path must be absolute")
-        return v
+        try:
+            return validate_absolute_path(v, "library/download path")
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 def _clean_update(payload: SettingsUpdate) -> dict:

@@ -81,15 +81,22 @@ class FakeClient:
         return (detail.get("tracks") or {}).get("data") or []
 
 
-def _release(rid, title, date="2026-09-20", rtype="single"):
-    return {"id": rid, "title": title, "release_date": date, "record_type": rtype}
+def _today() -> str:
+    """Dates in these fixtures must stay inside the backfill window."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _album(rid, title, track_ids, primary_artist_id=999, date="2026-09-20"):
+def _release(rid, title, date=None, rtype="single"):
+    return {"id": rid, "title": title, "release_date": date or _today(),
+            "record_type": rtype}
+
+
+def _album(rid, title, track_ids, primary_artist_id=999, date=None):
     return {
         "id": rid,
         "title": title,
-        "release_date": date,
+        "release_date": date or _today(),
         "artist": {"id": primary_artist_id, "name": "Someone"},
         "tracks": {"data": [
             {"id": t, "title": f"Track {t}", "artist": {"id": primary_artist_id, "name": "Someone"}}
@@ -111,11 +118,11 @@ def watch_db(monkeypatch, tmp_path):
 SETTINGS = {"watch_backfill_days": 30, "default_quality": "balanced", "default_format": "mp3"}
 
 
-async def _add_watch(name, quality="balanced"):
+async def _add_watch(name, quality="balanced", auto_download=1):
     from backend.database import execute
     await execute(
         "INSERT INTO watched_artists (artist_name, auto_download, quality_profile) "
-        "VALUES (?, 1, ?)", (name, quality),
+        "VALUES (?, ?, ?)", (name, auto_download, quality),
     )
 
 
@@ -129,7 +136,7 @@ class TestCheckArtist:
         await init_db()
         try:
             old = _release(1, "Ancient", date="2020-01-01", rtype="album")
-            recent = _release(2, "Fresh", date="2026-09-20", rtype="single")
+            recent = _release(2, "Fresh", date=_today(), rtype="single")
             client = FakeClient(
                 [old, recent],
                 {
@@ -242,6 +249,47 @@ class TestCheckArtist:
         finally:
             await close_db()
 
+    async def test_scheduled_check_tracks_releases_without_downloading(self, watch_db):
+        from backend.database import init_db, close_db, fetch_one, fetch_all
+        await init_db()
+        try:
+            client = FakeClient(
+                [_release(2, "Fresh")],
+                {2: _album(2, "Fresh", [201, 202])},
+            )
+            await _add_watch("Someone", auto_download=0)
+            row = await fetch_one("SELECT * FROM watched_artists WHERE id=1")
+
+            n = await W.check_artist(client, row, SETTINGS)
+            assert n == 0, "auto-download is off"
+            assert await fetch_all("SELECT * FROM jobs") == []
+            assert client.album_calls == [], "no need to fetch album detail"
+
+            after = await fetch_one("SELECT * FROM watched_artists WHERE id=1")
+            assert json.loads(after["known_releases"]) == ["2"]
+            assert after["last_checked"]
+            assert after["last_new_release"].startswith(_today())
+        finally:
+            await close_db()
+
+    async def test_manual_check_downloads_even_when_auto_is_off(self, watch_db):
+        from backend.database import init_db, close_db, fetch_one, fetch_all
+        await init_db()
+        try:
+            client = FakeClient(
+                [_release(2, "Fresh")],
+                {2: _album(2, "Fresh", [201, 202])},
+            )
+            await _add_watch("Someone", auto_download=0)
+            row = await fetch_one("SELECT * FROM watched_artists WHERE id=1")
+
+            n = await W.check_artist(client, row, SETTINGS, manual=True)
+            assert n == 2
+            jobs = await fetch_all("SELECT source_url FROM jobs ORDER BY id")
+            assert len(jobs) == 2
+        finally:
+            await close_db()
+
 
 class TestPollOnce:
     async def test_respects_interval(self, watch_db, monkeypatch):
@@ -278,6 +326,70 @@ class TestPollOnce:
             assert await W.poll_once() == 0
         finally:
             await close_db()
+
+    async def test_manual_flag_is_forwarded(self, watch_db, monkeypatch):
+        from backend.database import init_db, close_db, execute
+        await init_db()
+        try:
+            settings = {**SETTINGS, "watch_enabled": True,
+                        "watched_check_interval": 3600}
+            monkeypatch.setattr(W.config, "get_all", lambda: settings)
+            await execute(
+                "INSERT INTO watched_artists (artist_name, auto_download, "
+                "deezer_artist_id) VALUES ('A', 0, '999')"
+            )
+            seen = []
+
+            async def fake_check(client, row, cfg, *, manual=False):
+                seen.append(manual)
+                return 0
+
+            monkeypatch.setattr(W, "check_artist", fake_check)
+            await W.poll_once()
+            await W.poll_once(manual=True)
+            assert seen == [False, True]
+        finally:
+            await close_db()
+
+
+class TestArtistResolution:
+    """Only a unique exact name match may resolve an artist."""
+
+    @staticmethod
+    def _client(payload):
+        client = object.__new__(W.DeezerWatchClient)
+
+        async def fake_get(endpoint):
+            return payload
+
+        client.get = fake_get
+        return client
+
+    async def test_unique_exact_match_wins_even_with_smaller_fanbase(self):
+        client = self._client({"data": [
+            {"id": 1, "name": "Cover Band", "nb_fan": 999999},
+            {"id": 2, "name": "Target Artist", "nb_fan": 3},
+        ]})
+        found = await client.search_artist("target artist")
+        assert found["id"] == 2
+
+    async def test_ambiguous_exact_match_is_refused(self):
+        client = self._client({"data": [
+            {"id": 2, "name": "Same Name", "nb_fan": 100},
+            {"id": 3, "name": "same name", "nb_fan": 200},
+        ]})
+        with pytest.raises(LookupError, match="refusing to guess"):
+            await client.search_artist("Same Name")
+
+    async def test_no_exact_match_is_not_guessed(self):
+        client = self._client({"data": [
+            {"id": 1, "name": "Totally Different", "nb_fan": 999999},
+        ]})
+        assert await client.search_artist("Target Artist") is None
+
+    async def test_empty_results(self):
+        client = self._client({"data": []})
+        assert await client.search_artist("Nobody") is None
 
 
 # --------------------------------------------------------------------------
@@ -437,3 +549,10 @@ class TestDownloadContract:
         for cls in (YtdlpDownloader, DeezerDownloader):
             ann = cls.download.__annotations__.get("return")
             assert ann == "tuple[str, dict | None]" or ann == tuple[str, dict | None], cls.__name__
+
+
+class TestYtdlpTls:
+    def test_certificate_verification_is_never_disabled(self):
+        from backend.sources import ytdlp_source as Y
+        for opts in (Y._YT_DLP_OPTS_BASE, Y._YT_DLP_OPTS_SOUNDCLOUD):
+            assert opts.get("no_check_certificates") is not True

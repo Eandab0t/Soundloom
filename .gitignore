@@ -39,3 +39,6 @@ Ai Chats/
 
 # E-Tuner release (separate project)
 release/
+
+# Internal working documents (not for public release)
+__secret/

@@ -6,8 +6,10 @@ export const Library = {
   tracks: [], total: 0, page: 1, perPage: 100, sortBy: 'title', order: 'ASC',
   subView: 'tracks', _albumFilter: '', statusFilter: '', state: null,
   _bfTimer: null, _moves: {},
+  selected: new Set(),
 
   async loadTracks() {
+    this.selected.clear();
     const search = document.getElementById('lib-search')?.value || '';
     const artist = document.getElementById('lib-artist-filter')?.value || '';
     const format = document.getElementById('lib-format-filter')?.value || '';
@@ -47,7 +49,8 @@ export const Library = {
     if (empty) empty.style.display = 'none';
     if (view) view.style.display = '';
     tbody.innerHTML = this.tracks.map(t => `
-      <tr data-track-id="${t.id}" class="${t.file_status === 'missing' ? 'is-missing' : ''}">
+      <tr data-track-id="${t.id}" class="${t.file_status === 'missing' ? 'is-missing' : ''}${this.selected.has(t.id) ? ' is-selected' : ''}">
+        <td class="th-select-cell"><input type="checkbox" class="lib-row-select" data-track-id="${t.id}" ${this.selected.has(t.id) ? 'checked' : ''} aria-label="Select ${esc(t.title)}"></td>
         <td class="lib-play-cell">
           ${coverImg(t)}
           ${t.file_status === 'missing'
@@ -135,6 +138,29 @@ export const Library = {
       if (!track) return;
       btn.addEventListener('click', (e) => { e.stopPropagation(); this.restoreTrack(track); });
     });
+
+    // Row checkboxes for bulk actions.
+    tbody.querySelectorAll('.lib-row-select').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        e.stopPropagation();
+        const id = Number(cb.dataset.trackId);
+        if (cb.checked) this.selected.add(id);
+        else this.selected.delete(id);
+        this.updateBulkBar();
+      });
+    });
+
+    // Select-all checkbox.
+    const selectAll = document.getElementById('lib-select-all');
+    if (selectAll) {
+      selectAll.checked = this.tracks.length > 0 && this.tracks.every(t => this.selected.has(t.id));
+      selectAll.onchange = (e) => {
+        if (e.target.checked) this.tracks.forEach(t => this.selected.add(t.id));
+        else this.selected.clear();
+        this.updateBulkBar();
+        this.renderTracks();
+      };
+    }
   },
 
   /**
@@ -166,6 +192,46 @@ export const Library = {
              `<button class="btn ghost xs lib-more" type="button" data-detail="${t.id}">Details</button>`;
     }
     return '';
+  },
+
+  // --- bulk selection -------------------------------------------------------
+
+  updateBulkBar() {
+    const bar = document.getElementById('lib-bulk-bar');
+    const count = document.getElementById('lib-bulk-count');
+    if (!bar || !count) return;
+    if (this.selected.size === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+    count.textContent = `${this.selected.size} selected`;
+    bar.style.display = '';
+  },
+
+  bulkSelectNone() {
+    this.selected.clear();
+    this.updateBulkBar();
+    this.renderTracks();
+  },
+
+  selectedTracks() {
+    return this.tracks.filter(t => this.selected.has(t.id));
+  },
+
+  async bulkEnqueue() {
+    const tracks = this.selectedTracks();
+    if (!tracks.length) return;
+    Player.enqueue(tracks);
+    showToast(`Added ${tracks.length} to the queue`, 'success');
+    this.bulkSelectNone();
+  },
+
+  async bulkPlay() {
+    const tracks = this.selectedTracks();
+    if (!tracks.length) return;
+    Player.setQueue(tracks, 0);
+    showToast(`Playing ${tracks.length} tracks`, 'success');
+    this.bulkSelectNone();
   },
 
   /**

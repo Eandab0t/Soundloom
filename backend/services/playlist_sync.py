@@ -267,9 +267,17 @@ async def _job_already_running(source_url: str) -> bool:
 async def _enqueue_job(source_url: str, title: str, artist: str,
                        row: dict, source_type: str) -> None:
     from ..database import execute
+    from .. import config
+    quality = (row.get("quality_profile")
+               or config.get_all().get("default_quality", "balanced"))
+    from ..pipeline.models import QUALITY_PRESETS
+    output_format = (
+        QUALITY_PRESETS.get(quality, QUALITY_PRESETS["balanced"]).output_format
+        or config.get_all().get("default_format", "mp3")
+    )
     await execute(
         "INSERT INTO jobs (source_url, source_type, query, title, artist, "
-        "output_format, quality_profile, status) VALUES (?, ?, ?, ?, ?, "
-        "'mp3', 'balanced', 'pending')",
-        (source_url, source_type, source_url, title, artist or ""),
+        "output_format, quality_profile, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+        (source_url, source_type, source_url, title, artist or "",
+         output_format, quality),
     )

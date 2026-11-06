@@ -62,6 +62,7 @@ export const Player = {
   volume: 0.9,
   muted: false,
   queueOpen: false,
+  collapsed: false,
 
   _order: [],        // playback order: indices into queue
   _pos: -1,          // cursor into _order
@@ -103,6 +104,7 @@ export const Player = {
       queueCount: document.getElementById('pq-count'),
       clear: document.getElementById('pq-clear'),
       close: document.getElementById('pq-close'),
+      collapse: document.getElementById('pb-collapse'),
     };
 
     this.restore();
@@ -112,6 +114,7 @@ export const Player = {
     // exist. Without this the queue panel silently comes back closed even
     // though it was open when the app was closed.
     this.toggleQueue(this.queueOpen);
+    this._el.root.classList.toggle('collapsed', this.collapsed);
     this.render();
     this.setupKeys();
   },
@@ -135,6 +138,7 @@ export const Player = {
       ? Math.min(1, Math.max(0, saved.volume)) : 0.9;
     this.muted = !!saved.muted;
     this.queueOpen = !!saved.queueOpen;
+    this.collapsed = !!saved.collapsed;
     this.queue = Array.isArray(saved.queue) ? saved.queue.filter(t => t && t.id) : [];
 
     const idx = Number.isInteger(saved.index) ? saved.index : -1;
@@ -159,6 +163,7 @@ export const Player = {
         volume: this.volume,
         muted: this.muted,
         queueOpen: this.queueOpen,
+        collapsed: this.collapsed,
       }));
     } catch (err) {
       // A full or blocked localStorage must not break playback; it only
@@ -543,6 +548,12 @@ export const Player = {
     if (this.queueOpen) this.renderQueue();
   },
 
+  toggleCollapse() {
+    this.collapsed = !this.collapsed;
+    this._el.root.classList.toggle('collapsed', this.collapsed);
+    this.save();
+  },
+
   _onError() {
     const track = this.current();
     this._errors += 1;
@@ -595,6 +606,7 @@ export const Player = {
     e.queueToggle.addEventListener('click', () => this.toggleQueue());
     e.close.addEventListener('click', () => this.toggleQueue(false));
     e.clear.addEventListener('click', () => this.clearQueue());
+    e.collapse.addEventListener('click', () => this.toggleCollapse());
 
     e.volume.addEventListener('input', () => this.setVolume(e.volume.value));
 
@@ -684,6 +696,7 @@ export const Player = {
         case 'r': hit(); this.cycleRepeat(); break;
         case 'm': hit(); this.toggleMute(); break;
         case 'q': hit(); this.toggleQueue(); break;
+        case 'c': hit(); this.toggleCollapse(); break;
         default: break;
       }
     });

@@ -49,6 +49,11 @@ from ..services.operations import OpState
 
 logger = logging.getLogger(__name__)
 
+
+class JobCancelled(Exception):
+    """Raised at a safe checkpoint after the user cancelled an active job."""
+
+
 _worker_tasks = []
 _stop_event = asyncio.Event()
 _semaphore: asyncio.Semaphore | None = None
@@ -273,9 +278,9 @@ async def _pick_next_job() -> dict | None:
     not reentrant, so calling it while already holding the lock deadlocks the
     whole app on the first job.
     """
-    from ..database import _db_lock, get_db
+    from ..database import _get_db_lock, get_db
 
-    async with _db_lock:
+    async with _get_db_lock():
         async with get_db() as db:
             cursor = await db.execute(
                 """
@@ -295,6 +300,36 @@ async def _pick_next_job() -> dict | None:
             row = await cursor.fetchone()
             await db.commit()
             return dict(row) if row else None
+
+
+async def _ensure_not_cancelled(job_id: int) -> None:
+    """Abort the pipeline when the job was cancelled or removed.
+
+    Cancellation is cooperative: yt-dlp cannot be interrupted mid-transfer, so
+    the checkpoints sit immediately before each file-mutating stage. Once the
+    organizer starts, the queue API refuses to cancel (the file is already on
+    its way into the library), so there is no half-committed state to unwind.
+    """
+    row = await fetch_one("SELECT status FROM jobs WHERE id=?", (job_id,))
+    if not row or row["status"] == JobState.CANCELLED.value:
+        raise JobCancelled(f"Job {job_id} was cancelled")
+
+
+async def _handle_job_cancellation(op_id: int, job_id: int) -> None:
+    """Close a cancelled job's operation and mark the job cancelled.
+
+    Kept out of _process_job so the journal-chain test (which reads
+    _process_job's source in order) does not see a spurious
+    committed -> abandoned transition - a cancelled job never reaches commit.
+    """
+    logger.info(f"Job {job_id}: cancelled by user; abandoned before commit")
+    try:
+        await ops.advance(op_id, OpState.ABANDONED, error="Cancelled by user")
+    except Exception as e:
+        logger.warning(f"Job {job_id}: could not close cancelled operation: {e}")
+    await _update_job(job_id, status=JobState.CANCELLED.value,
+                      error="Cancelled by user", progress=0)
+    await emit_job_update(job_id, "cancelled")
 
 
 async def _set_state(job_id: int, state: JobState, progress: float = None):
@@ -485,6 +520,8 @@ async def _process_job(job: dict):
     )
 
     try:
+        await _ensure_not_cancelled(job_id)
+
         # Deezer search jobs resolve to a concrete track URL first; "nothing
         # found" raises ResolveError and the fallback chain moves on.
         if source_url.startswith("dzsearch:"):
@@ -610,6 +647,7 @@ async def _process_job(job: dict):
         else:
             downloader = YtdlpDownloader()
 
+        await _ensure_not_cancelled(job_id)
         if candidate.source_type != SourceType.LOCAL:
             try:
                 thumb_base = str(tmp_dir / "thumb")
@@ -664,6 +702,7 @@ async def _process_job(job: dict):
         await _update_job(job_id, progress=65)
         await ops.advance(op_id, OpState.DOWNLOADED, staged_path=actual_path)
 
+        await _ensure_not_cancelled(job_id)
         await _set_state(job_id, JobState.CONVERTING, 65)
         await emit_job_update(job_id, "converting", 65)
         conv_dir = tmp_dir / "converted"
@@ -674,6 +713,7 @@ async def _process_job(job: dict):
         await _update_job(job_id, progress=80)
         await ops.advance(op_id, OpState.VALIDATED, staged_path=conv_path)
 
+        await _ensure_not_cancelled(job_id)
         await _set_state(job_id, JobState.TAGGING, 80)
         await emit_job_update(job_id, "tagging", 80)
         tag_data = {
@@ -703,6 +743,9 @@ async def _process_job(job: dict):
         await _update_job(job_id, progress=90)
         await ops.advance(op_id, OpState.TAGGED, staged_path=conv_path)
 
+        # Last safe cancellation point: after this the file is moved into the
+        # library and must be indexed to avoid an orphan.
+        await _ensure_not_cancelled(job_id)
         await _set_state(job_id, JobState.ORGANIZING, 90)
         await emit_job_update(job_id, "organizing", 90)
         folder_template = settings.get("folder_template", "{album_artist}\\{album}\\{track_number} - {title}.{format}")
@@ -730,6 +773,9 @@ async def _process_job(job: dict):
         await emit("library_change", {"action": "added"})
         await _update_job(job_id, output_path=final_path)
         logger.info(f"Job {job_id} complete: {final_path}")
+
+    except JobCancelled:
+        await _handle_job_cancellation(op_id, job_id)
 
     except ResolveError as e:
         log_error(e, ErrorContext(operation="resolve", job_id=job_id, source_url=source_url))

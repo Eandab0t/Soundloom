@@ -146,8 +146,17 @@ class TestMirror:
         assert len(jobs) == 1
 
     async def test_mirror_skips_already_matched(self, sync_db):
-        pid = await sync.add(1, "https://example.com/playlist", "spotify")
-        pid = pid["id"]
+        # A sync intent (playlist_syncs) is separate from a playlist (playlists).
+        # The playlist_tracks rows reference playlists.id, so create both.
+        await sync.add(1, "https://example.com/playlist", "spotify")
+        await db.execute(
+            "INSERT INTO playlists (name, description, origin, origin_ref, created_at, updated_at) "
+            "VALUES (?, '', 'manual', '', datetime('now'), datetime('now'))",
+            ("Test Playlist",),
+        )
+        pl = await db.fetch_one("SELECT id FROM playlists ORDER BY id DESC LIMIT 1")
+        assert pl is not None
+        pid = pl["id"]
         await db.execute(
             "INSERT INTO playlist_tracks (playlist_id, position, title, artist, track_id) "
             "VALUES (?, 1, 'Known', 'Artist', 42)",
@@ -160,8 +169,15 @@ class TestMirror:
 
     async def test_mirror_works_with_non_empty_name(self, sync_db):
         # This exercises the sync_tables path (the DB has a playlist_syncs row).
-        pid = await sync.add(1, "https://example.com/playlist", "spotify")
-        pid = pid["id"]
+        await sync.add(1, "https://example.com/playlist", "spotify")
+        await db.execute(
+            "INSERT INTO playlists (name, description, origin, origin_ref, created_at, updated_at) "
+            "VALUES (?, '', 'manual', '', datetime('now'), datetime('now'))",
+            ("Test Playlist",),
+        )
+        pl = await db.fetch_one("SELECT id FROM playlists ORDER BY id DESC LIMIT 1")
+        assert pl is not None
+        pid = pl["id"]
         await db.execute(
             "INSERT INTO playlist_tracks (playlist_id, position, title, artist) "
             "VALUES (?, 1, 'X', 'Y')",

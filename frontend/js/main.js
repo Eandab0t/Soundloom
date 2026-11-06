@@ -23,6 +23,7 @@ const App = {
     this.setupNav();
     this.setupTheme();
     this.setupKeyboard();
+    this.maybeOnboard();
     // Initialised before the tabs so a restored queue is already rendering
     // when the library's first paint lands.
     Player.init();
@@ -135,6 +136,17 @@ const App = {
 
   toggleCollapse(id) { document.getElementById(id)?.classList.toggle('open'); },
 
+  async maybeOnboard() {
+    // Skip if already dismissed, or if a library is already configured.
+    if (localStorage.getItem('soundloom-onboarded') === '1') return;
+    const s = await API.get('/api/settings').catch(() => ({}));
+    const tracks = await API.get('/api/library/tracks?limit=1')
+      .then(d => d.total || 0)
+      .catch(() => 0);
+    if (s.library_path || tracks > 0) return;
+    Onboarding.open();
+  },
+
   setupKeyboard() {
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
@@ -158,7 +170,116 @@ const App = {
   },
 };
 
-// Expose the modules the inline HTML onclick handlers reference.
+// ============ ONBOARDING ============
+// A short, dismissible first-launch flow that helps new users configure their
+// music folder and discover key capabilities. Never requires accounts or cloud.
+const STEPS = [
+  {
+    title: 'What Soundloom does',
+    body: `
+      <p>Soundloom is a local music-library manager that runs on your machine.
+      Nothing is uploaded, and no account is required.</p>
+      <ul style="margin:8px 0 0; padding-left:20px; text-align:left; max-width:420px; margin:0 auto;">
+        <li>Scan and index your existing music folder</li>
+        <li>Download new music from URLs (YouTube, SoundCloud, Deezer)</li>
+        <li>Watch artists for new releases (auto-download)</li>
+        <li>Sync Spotify/Deezer playlists into your library</li>
+        <li>Fix metadata, convert formats, and play your library</li>
+      </ul>
+    `,
+  },
+  {
+    title: 'Set your music folder',
+    body: `
+      <p>Tell Soundloom where your music lives. Open <strong>Settings &rarr; General</strong>
+      and set <strong>Library path</strong> to your music folder (e.g. <code>E:/Music</code>).</p>
+      <p class="muted">Soundloom only reads this folder during a scan, and only writes
+      to it for tracks it acquires.</p>
+    `,
+  },
+  {
+    title: 'Scan your library',
+    body: `
+      <p>Back in the <strong>Library</strong> tab, click <strong>Scan</strong> to index
+      every file in your music folder. This reads tags and file sizes — it does not
+      rename, move, or rewrite anything.</p>
+      <p class="muted">The scan runs in the background; watch progress in the Library tab.</p>
+    `,
+  },
+  {
+    title: 'You&rsquo;re all set',
+    body: `
+      <p>From here you can:</p>
+      <ul style="margin:8px 0 0; padding-left:20px; text-align:left; max-width:420px; margin:0 auto;">
+        <li><strong>Watch</strong> artists to auto-download new releases</li>
+        <li><strong>Sync</strong> Spotify/Deezer playlists into your library</li>
+        <li><strong>Add Music</strong> from a URL or your own files</li>
+        <li><strong>Identify</strong> and fix metadata against online databases</li>
+      </ul>
+      <p class="muted">Keyboard: Ctrl+K searches your library; Space plays/pauses; ? shows all shortcuts.</p>
+    `,
+  },
+];
+
+export const Onboarding = {
+  step: 0,
+  open() {
+    const sheet = document.getElementById('onboarding-sheet');
+    if (!sheet) return;
+    this.step = 0;
+    sheet.hidden = false;
+    this.render();
+  },
+  close() {
+    const sheet = document.getElementById('onboarding-sheet');
+    if (!sheet) return;
+    sheet.hidden = true;
+  },
+  render() {
+    const body = document.getElementById('onboarding-body');
+    const btnNext = document.getElementById('onboarding-next');
+    const btnSkip = document.getElementById('onboarding-skip');
+    const step = STEPS[this.step];
+    if (!body) return;
+    body.innerHTML = `
+      <div style="margin-bottom:14px">
+        <span style="font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--text-3)">Step ${this.step + 1} of ${STEPS.length}</span>
+        <h3 style="margin:6px 0 4px">${step.title}</h3>
+        ${step.body}
+      </div>
+      <div class="muted" style="font-size:11px">Press Esc or &times; to skip at any time.</div>`;
+    if (btnNext) btnNext.textContent = this.step === STEPS.length - 1 ? 'Finish' : 'Next';
+    if (btnSkip) btnSkip.textContent = 'Skip';
+  },
+  next() {
+    if (this.step < STEPS.length - 1) {
+      this.step++;
+      this.render();
+    } else {
+      this.finish();
+    }
+  },
+  finish() {
+    localStorage.setItem('soundloom-onboarded', '1');
+    this.close();
+  },
+  wire() {
+    const sheet = document.getElementById('onboarding-sheet');
+    if (!sheet) return;
+    sheet.querySelector('[data-close]')?.addEventListener('click', () => this.finish());
+    document.getElementById('onboarding-skip')?.addEventListener('click', () => this.finish());
+    document.getElementById('onboarding-next')?.addEventListener('click', () => this.next());
+    sheet.addEventListener('click', (e) => {
+      if (e.target === sheet) this.finish();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !sheet.hidden) { e.preventDefault(); this.finish(); }
+    });
+  },
+};
+
+// Wire onboarding buttons once the DOM is ready.
+document.addEventListener('DOMContentLoaded', () => Onboarding.wire());
 // (AddSource and Logs were missing before — their buttons silently threw.)
 Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Attention, Shortcuts });
 

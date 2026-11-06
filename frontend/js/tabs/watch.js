@@ -16,7 +16,19 @@ export const Watch = {
     const name = input.value.trim();
     if (!name) return;
     try {
-      await API.post('/api/watch', { artist_name: name });
+      await API.post('/api/watch', { artist_name: name, auto_download: 1 });
+      showToast(`Now watching ${name}`, 'success');
+      input.value = '';
+      this.load();
+    } catch (e) { showToast(e.message, 'error'); }
+  },
+
+  async addFromEmpty() {
+    const input = document.getElementById('watch-empty-input');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await API.post('/api/watch', { artist_name: name, auto_download: 1 });
       showToast(`Now watching ${name}`, 'success');
       input.value = '';
       this.load();
@@ -32,8 +44,12 @@ export const Watch = {
         el.innerHTML = `
           <div class="empty-state">
             <p>No artists being followed.</p>
-            <p class="muted">Follow an artist and every new album, EP and single they release
-            is queued automatically — checked about once an hour.</p>
+            <p class="muted">Follow an artist and every new album, EP and single
+            they release is queued automatically — checked about once an hour.</p>
+            <div class="input-row" style="justify-content:center; margin-top:16px; gap:8px;">
+              <input type="text" id="watch-empty-input" class="input sm grow" style="max-width:320px" placeholder="Artist name…" onkeydown="if(event.key==='Enter')Watch.addFromEmpty()">
+              <button class="btn primary sm" onclick="Watch.addFromEmpty()">Follow artist</button>
+            </div>
           </div>`;
         this.updateBadge(0);
         return;
@@ -67,7 +83,7 @@ export const Watch = {
           <span class="toggle-slider"></span>
         </label>
         <div class="item-actions">
-          <button class="btn ghost sm" data-action="checkOne" data-id="${w.id}" title="Check now">↻</button>
+          <button class="btn ghost sm" data-action="checkOne" data-id="${w.id}" title="Check now and queue new releases">↻</button>
           <button class="btn danger sm" data-action="remove" data-id="${w.id}" title="Unfollow">✕</button>
         </div>
       </div>`;
