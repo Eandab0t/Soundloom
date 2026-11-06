@@ -37,6 +37,9 @@ build/
 # E-Tuner release (separate project)
 release/
 
+# AI chat logs (large files)
+Ai Chats/
+
 # Internal working documents (not for public release)
 documents/
 __secret/
