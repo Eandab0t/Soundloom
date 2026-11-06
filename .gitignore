@@ -38,4 +38,8 @@ build/
 release/
 
 # Internal working documents (not for public release)
+<<<<<<< HEAD
 documents/
+=======
+__secret/
+>>>>>>> f16c76bba8e392cda8d0442a4771fd454df3dcf5

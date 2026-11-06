@@ -28,6 +28,7 @@ import aiohttp
 from .. import config
 from ..database import fetch_all, fetch_one, execute
 from ..events import emit
+from ..pipeline.models import QUALITY_PRESETS
 from ..pipeline.normalize import normalize_text
 from . import source_registry
 
@@ -277,9 +278,13 @@ async def _in_library(track: dict) -> bool:
     if not t:
         return False
     artist = normalize_text((track.get("artist") or "").split(",")[0])
+    # Pre-filter by lowercased title in SQLite so we don't scan the whole
+    # library for every track; exact normalised matching happens in Python.
     rows = await fetch_all(
         "SELECT title, artist, primary_artist, display_artist FROM tracks "
-        "WHERE file_status != 'missing' AND title IS NOT NULL"
+        "WHERE file_status != 'missing' AND title IS NOT NULL "
+        "AND LOWER(title) = LOWER(?)",
+        (track.get("title") or "",),
     )
     for r in rows:
         if normalize_text(r.get("title") or "") == t:
@@ -301,9 +306,15 @@ async def _already_queued(track: dict) -> bool:
     marker = normalize_text(f"{track.get('artist', '')} {track.get('title', '')}")
     if not marker:
         return False
+    artist = normalize_text(track.get("artist", "").split(",")[0])
+    title = normalize_text(track.get("title", ""))
+    # Pre-filter: the search URL or query must at least mention the artist and
+    # title. Exact normalised matching happens in Python on the small result set.
     rows = await fetch_all(
         "SELECT source_url, query FROM jobs "
-        "WHERE status NOT IN ('complete','failed','cancelled')"
+        "WHERE status NOT IN ('complete','failed','cancelled') "
+        "AND (LOWER(source_url) LIKE LOWER(?) OR LOWER(query) LIKE LOWER(?))",
+        (f"%{title}%", f"%{title}%"),
     )
     for r in rows:
         haystack = normalize_text(f"{r.get('source_url') or ''} {r.get('query') or ''}")
@@ -326,8 +337,13 @@ def _load_ids(raw: str | None) -> set[str]:
 # Sync core
 # --------------------------------------------------------------------------
 
-async def sync_playlist(playlist_id: int) -> dict:
-    """Sync one synced_playlists row. Returns a summary dict."""
+async def sync_playlist(playlist_id: int, pass_budget: int) -> dict:
+    """Sync one synced_playlists row. Returns a summary dict.
+
+    `pass_budget` is the remaining global enqueue budget for this pass —
+    every playlist in the same pass draws from it, so a first sync of a
+    large playlist cannot flood the queue at the expense of others.
+    """
     row = await fetch_one("SELECT * FROM synced_playlists WHERE id=?", (playlist_id,))
     if not row:
         raise ValueError(f"Synced playlist {playlist_id} not found")
@@ -337,6 +353,11 @@ async def sync_playlist(playlist_id: int) -> dict:
     search_source = _primary_search_source(settings)
     source_type = row["source_type"]
     source_ref = row["source_ref"] or row["url"]
+    quality_name = row.get("quality_profile") or settings.get("default_quality", "balanced")
+    output_format = (
+        QUALITY_PRESETS.get(quality_name, QUALITY_PRESETS["balanced"]).output_format
+        or settings.get("default_format", "mp3")
+    )
 
     enqueued = skipped_owned = skipped_queued = 0
     new_track_ids: list[str] = []
@@ -359,7 +380,6 @@ async def sync_playlist(playlist_id: int) -> dict:
             tracks = await client.playlist_tracks(source_ref)
 
         known = _load_ids(row["last_track_ids"])
-        pass_budget = _MAX_ENQUEUES_PER_PASS
 
         for track in tracks:
             tid = track["id"]
@@ -401,13 +421,15 @@ async def sync_playlist(playlist_id: int) -> dict:
 
             await execute(
                 "INSERT INTO jobs (source_url, source_type, query, title, artist, "
-                "output_format, quality_profile, status) VALUES (?, 'youtube', ?, ?, ?, 'mp3', ?, 'pending')",
+                "output_format, quality_profile, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
                 (
                     query_url,
+                    search_source,
                     track.get("title") or "",
                     track.get("title") or "",
                     track.get("artist") or "",
-                    row["quality_profile"] or "balanced",
+                    output_format,
+                    quality_name,
                 ),
             )
             enqueued += 1
@@ -425,10 +447,11 @@ async def sync_playlist(playlist_id: int) -> dict:
             "owned": skipped_owned,
             "already_queued": skipped_queued,
             "errors": errors,
+            "budget_remaining": pass_budget,
         })
         logger.info(
             f"Sync '{playlist_name}': {enqueued} enqueued, {skipped_owned} owned, "
-            f"{skipped_queued} already queued"
+            f"{skipped_queued} already queued, {pass_budget} budget left"
         )
         return {
             "playlist_id": playlist_id,
@@ -438,7 +461,17 @@ async def sync_playlist(playlist_id: int) -> dict:
             "owned": skipped_owned,
             "already_queued": skipped_queued,
             "errors": errors,
+            "budget_remaining": pass_budget,
         }
+
+    except Exception as e:
+        logger.error(f"Sync of playlist {playlist_id} failed: {e}", exc_info=True)
+        await execute(
+            "UPDATE synced_playlists SET last_error=?, last_synced=? WHERE id=?",
+            (str(e)[:300], _iso(_utcnow()), playlist_id),
+        )
+        await emit("sync_update", {"playlist_id": playlist_id, "error": str(e)})
+        raise
 
     except Exception as e:
         logger.error(f"Sync of playlist {playlist_id} failed: {e}", exc_info=True)
@@ -474,15 +507,24 @@ async def sync_due() -> list[int]:
 
 
 async def poll_once(force: bool = False) -> int:
-    """One scheduler pass. Returns total tracks enqueued."""
+    """One scheduler pass. Returns total tracks enqueued.
+
+    The per-pass enqueue budget is global across all due playlists, so the
+    first sync of a big playlist cannot starve the others.
+    """
     due = await sync_due()
     if not due and not force:
         return 0
     total = 0
+    budget = _MAX_ENQUEUES_PER_PASS
     for pid in due:
+        if budget <= 0:
+            logger.info("Sync pass: global enqueue budget exhausted")
+            break
         try:
-            result = await sync_playlist(pid)
+            result = await sync_playlist(pid, budget)
             total += result["enqueued"]
+            budget = result.get("budget_remaining", budget)
         except Exception as e:
             logger.warning(f"Scheduled sync of playlist {pid} failed: {e}")
     return total

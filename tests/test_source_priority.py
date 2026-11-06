@@ -76,7 +76,7 @@ class TestSyncUsesPriority:
             pid = await _add_sync()
             monkeypatch.setattr(sync_mod, "SpotifyClient",
                                 make_client_cls({"name": "Mix"}, [{"id": "s1", "title": "One", "artist": "Alpha"}]))
-            await sync_mod.sync_playlist(pid)
+            await sync_mod.sync_playlist(pid, sync_mod._MAX_ENQUEUES_PER_PASS)
             jobs = await fetch_all("SELECT source_url FROM jobs")
             assert jobs[0]["source_url"].startswith("ytsearch1:")
         finally:
@@ -93,7 +93,7 @@ class TestSyncUsesPriority:
             pid = await _add_sync()
             monkeypatch.setattr(sync_mod, "SpotifyClient",
                                 make_client_cls({"name": "Mix"}, [{"id": "s1", "title": "One", "artist": "Alpha"}]))
-            await sync_mod.sync_playlist(pid)
+            await sync_mod.sync_playlist(pid, sync_mod._MAX_ENQUEUES_PER_PASS)
             jobs = await fetch_all("SELECT source_url FROM jobs")
             assert jobs[0]["source_url"].startswith("dzsearch:")
         finally:
@@ -108,7 +108,7 @@ class TestSyncUsesPriority:
             pid = await _add_sync()
             monkeypatch.setattr(sync_mod, "SpotifyClient",
                                 make_client_cls({"name": "Mix"}, [{"id": "s1", "title": "One", "artist": "Alpha"}]))
-            await sync_mod.sync_playlist(pid)
+            await sync_mod.sync_playlist(pid, sync_mod._MAX_ENQUEUES_PER_PASS)
             jobs = await fetch_all("SELECT source_url FROM jobs")
             assert jobs[0]["source_url"].startswith("scsearch1:")
         finally:

@@ -1,6 +1,6 @@
 """Watch / artist follow endpoints."""
-import asyncio
 import logging
+import sqlite3
 
 from fastapi import APIRouter, HTTPException
 from ..database import fetch_all, execute, fetch_one
@@ -25,8 +25,11 @@ async def add_watched(data: dict):
             (name, data.get("auto_download", 0), data.get("quality_profile", "balanced"))
         )
         return {"status": "added"}
-    except Exception:
+    except sqlite3.IntegrityError:
         return {"status": "already_watched"}
+    except Exception as e:
+        logger.error(f"Could not add watch for {name!r}: {e}", exc_info=True)
+        raise HTTPException(500, "Could not add the watched artist")
 
 
 @router.put("/{watch_id}")
@@ -65,7 +68,7 @@ async def check_now():
     from ..services.watcher import poll_once
 
     try:
-        enqueued = await poll_once(force=True)
+        enqueued = await poll_once(force=True, manual=True)
     except Exception as e:
         logger.error(f"Manual watch check failed: {e}", exc_info=True)
         raise HTTPException(500, f"Watch check failed: {e}")
@@ -87,7 +90,7 @@ async def check_one(watch_id: int):
     try:
         async with aiohttp.ClientSession() as session:
             client = DeezerWatchClient(session)
-            enqueued = await check_artist(client, row, settings)
+            enqueued = await check_artist(client, row, settings, manual=True)
     except Exception as e:
         logger.warning(f"Manual check failed for watch {watch_id}: {e}")
         raise HTTPException(500, f"Check failed: {e}")

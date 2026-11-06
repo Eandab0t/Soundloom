@@ -184,6 +184,20 @@ class TestValidation:
         with pytest.raises(ValidationError):
             SettingsUpdate(library_path="Music")
 
+    def test_windows_drive_relative_rejected(self):
+        # C:relative contains a colon but is NOT absolute on Windows - it
+        # resolves against the CWD on the C drive. The old check accepted it.
+        with pytest.raises(ValidationError):
+            SettingsUpdate(library_path=r"C:relative\music")
+
+    def test_windows_drive_absolute_accepted(self):
+        assert SettingsUpdate(library_path=r"C:\Music").library_path == r"C:\Music"
+
+    def test_windows_unc_accepted(self):
+        assert SettingsUpdate(
+            library_path=r"\\server\share\music"
+        ).library_path == r"\\server\share\music"
+
     def test_absolute_paths_accepted(self):
         assert SettingsUpdate(library_path="C:/Music").library_path == "C:/Music"
         assert SettingsUpdate(download_path="/home/me/Music").download_path == "/home/me/Music"

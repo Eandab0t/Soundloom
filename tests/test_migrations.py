@@ -17,6 +17,33 @@ async def db_with_schema(tmp_path):
     await db.close()
 
 
+async def _apply_migrations_upto(db, upto_version: int):
+    """Manually apply migrations 1..upto_version and record them in schema_version.
+
+    Simulates a database created by an older version of Soundloom, so we can
+    test that upgrading from a partial schema to the current version works.
+    """
+    await db.execute("""CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+        applied_at TEXT DEFAULT (datetime('now'))
+    )""")
+    for m in MIGRATIONS:
+        if m.version > upto_version:
+            break
+        for statement in m.sql.strip().split(";"):
+            statement = statement.strip()
+            if statement:
+                try:
+                    await db.execute(statement)
+                except Exception:
+                    pass  # columns/tables may already exist from base SCHEMA
+        await db.execute(
+            "INSERT OR IGNORE INTO schema_version (version, name) VALUES (?, ?)",
+            (m.version, m.name),
+        )
+    await db.commit()
+
+
 @pytest.mark.asyncio
 async def test_run_migrations_on_fresh_db(db_with_schema):
     db = db_with_schema
@@ -72,3 +99,60 @@ async def test_migrations_creates_schema_version_table(db_with_schema):
     )
     row = await cursor.fetchone()
     assert row is not None
+
+
+# ---------------------------------------------------------------------------
+# Upgrade from older (partial) schemas — simulates existing user databases
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestMigrationUpgrade:
+    async def test_upgrade_from_migration_8(self, tmp_path):
+        """Simulate a DB at migration 8 (operations journal), upgrade to latest."""
+        db_path = tmp_path / "upgrade.db"
+        db = await aiosqlite.connect(str(db_path))
+        db.row_factory = aiosqlite.Row
+        await db.executescript(SCHEMA)
+        await _apply_migrations_upto(db, 8)
+
+        applied = await run_migrations(db)
+        assert applied == len(MIGRATIONS) - 8
+
+        # Verify key tables exist after upgrade.
+        for table in ("operations", "synced_playlists", "playlist_syncs",
+                      "sync_track_mapping", "sync_runs", "library_content",
+                      "file_observation", "canary"):
+            cursor = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            )
+            assert await cursor.fetchone() is not None, f"missing table: {table}"
+
+        await db.close()
+
+    async def test_upgrade_from_migration_12(self, tmp_path):
+        """Simulate a DB at migration 12 (backfill progress), upgrade to latest."""
+        db_path = tmp_path / "upgrade2.db"
+        db = await aiosqlite.connect(str(db_path))
+        db.row_factory = aiosqlite.Row
+        await db.executescript(SCHEMA)
+        await _apply_migrations_upto(db, 12)
+
+        applied = await run_migrations(db)
+        assert applied == len(MIGRATIONS) - 12
+
+        await db.close()
+
+    async def test_upgrade_is_idempotent(self, tmp_path):
+        """Running migrations twice after an upgrade applies nothing the second time."""
+        db_path = tmp_path / "upgrade3.db"
+        db = await aiosqlite.connect(str(db_path))
+        db.row_factory = aiosqlite.Row
+        await db.executescript(SCHEMA)
+        await _apply_migrations_upto(db, 5)
+
+        await run_migrations(db)
+        applied = await run_migrations(db)
+        assert applied == 0
+
+        await db.close()

@@ -4,6 +4,9 @@ import { API, showToast, esc } from '../core.js';
 export const Settings = {
   sourceOrder: [],
   sourceFallback: true,
+  _sections: [],   // { el, label, groups: [{el, labelEl, hintEl}] }
+  _searchInput: null,
+  _emptyState: null,
 
   async load() {
     try {
@@ -31,7 +34,133 @@ export const Settings = {
         redirect.title = 'Register this exact URL in your Spotify app settings';
       }
       this.loadSources();
+      this.setupPathValidation();
+      this.initSettingsSearch();
     } catch (e) { console.error(e); }
+  },
+
+  initSettingsSearch() {
+    const input = document.getElementById('settings-search');
+    const count = document.getElementById('settings-search-count');
+    if (!input) return;
+    this._searchInput = input;
+
+    // Index every collapsible section and its form groups once.
+    this._sections = [];
+    document.querySelectorAll('#tab-settings .collapsible').forEach(sec => {
+      const labelEl = sec.querySelector('.collapsible-header > span:first-child');
+      const groups = [];
+      sec.querySelectorAll('.form-group, .toggle-row').forEach(g => {
+        const lbl = g.querySelector('.label');
+        const hint = g.querySelector('.hint');
+        const labelText = lbl ? lbl.textContent : '';
+        const hintText = hint ? hint.textContent : '';
+        groups.push({ el: g, labelEl: lbl, hintEl: hint,
+                      labelText, hintText });
+      });
+      this._sections.push({
+        el: sec, labelEl, label: labelEl ? labelEl.textContent : '',
+        groups,
+      });
+    });
+
+    // Build an empty-state banner (hidden by default).
+    const empty = document.createElement('div');
+    empty.className = 'empty-state settings-empty';
+    empty.style.display = 'none';
+    empty.innerHTML = `
+      <svg viewBox="0 0 24 24" class="empty-icon"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      <h3>No matching settings</h3>
+      <p>Try a different keyword — setting names and descriptions are searched.</p>`;
+    input.parentElement.appendChild(empty);
+    this._emptyState = empty;
+
+    input.addEventListener('input', (e) => this.filterSettings(e.target.value));
+    this.filterSettings('');
+  },
+
+  filterSettings(query) {
+    const q = (query || '').toLowerCase().trim();
+    const countEl = document.getElementById('settings-search-count');
+    let matchCount = 0;
+
+    for (const sec of this._sections) {
+      let sectionHasMatch = false;
+      for (const g of sec.groups) {
+        const haystack = (g.labelText + ' ' + (g.hintEl?.textContent || '')).toLowerCase();
+        const match = q === '' || haystack.includes(q);
+        if (g.labelEl) {
+          // Highlight matching characters in the label.
+          if (q && match) {
+            g.labelEl.classList.add('setting-match');
+          } else {
+            g.labelEl.classList.remove('setting-match');
+          }
+        }
+        g.el.style.display = match ? '' : 'none';
+        if (match) sectionHasMatch = true;
+      }
+      // Show/hide the whole section based on whether any group matches.
+      sec.el.style.display = sectionHasMatch || q === '' ? '' : 'none';
+      if (sectionHasMatch) matchCount += sec.groups.filter(g =>
+        q === '' || (g.labelText + ' ' + (g.hintEl?.textContent || '')).toLowerCase().includes(q)
+      ).length;
+      // Expand sections that have matches when searching.
+      if (q && sectionHasMatch) sec.el.classList.add('open');
+    }
+
+    if (countEl) {
+      countEl.textContent = q ? `${matchCount} match${matchCount === 1 ? '' : 'es'}` : '';
+    }
+    if (this._emptyState) {
+      this._emptyState.style.display = (q && matchCount === 0) ? '' : 'none';
+    }
+    // When a search is active, collapse all non-matching sections visually
+    // is handled by display:none above; expand matching ones.
+    if (!q) {
+      document.querySelectorAll('#tab-settings .collapsible').forEach(sec =>
+        sec.classList.remove('open'));
+    }
+  },
+
+  setupPathValidation() {
+    for (const id of ['set-library-path', 'set-download-path']) {
+      const input = document.getElementById(id);
+      if (!input) continue;
+      input.addEventListener('blur', () => this.validatePath(input));
+      input.addEventListener('input', () => this.clearPathError(input));
+    }
+  },
+
+  clearPathError(input) {
+    const wrap = input.parentElement;
+    if (!wrap) return;
+    const old = wrap.querySelector('.path-error');
+    if (old) old.remove();
+    input.classList.remove('input-error');
+  },
+
+  validatePath(input) {
+    const v = input.value.trim();
+    if (!v) return; // empty is valid (uses default)
+    this.clearPathError(input);
+    // Windows absolute: drive letter or UNC. POSIX absolute: leading slash.
+    const isWindowsPath = /^[a-zA-Z]:[\\/]|^\\\\/.test(v);
+    const isPosixPath = /^\//.test(v);
+    if (!isWindowsPath && !isPosixPath) {
+      this.showPathError(input, 'Not an absolute path (e.g. C:/Music or \\\\server\\share)');
+    }
+  },
+
+  showPathError(input, msg) {
+    input.classList.add('input-error');
+    const wrap = input.parentElement;
+    if (!wrap) return;
+    const err = document.createElement('span');
+    err.className = 'path-error';
+    err.style.cssText = 'color:var(--error); font-size:11px; margin-top:4px; display:block;';
+    err.textContent = msg;
+    wrap.appendChild(err);
   },
 
   markSecret(id, configured, label) {

@@ -129,8 +129,18 @@ async def begin_operation(op_key: str, *, job_id: int | None = None,
     same row rather than creating a duplicate, so a retried job does not fork
     into two competing operations.
     """
-    existing = await fetch_one("SELECT id FROM operations WHERE op_key=?", (op_key,))
+    existing = await fetch_one("SELECT * FROM operations WHERE op_key=?", (op_key,))
     if existing:
+        # A retried job reattaches to its journal row. If that row ended in a
+        # terminal outcome (cancelled, exhausted, discarded), move it back to
+        # the front so the pipeline can advance it again; otherwise the first
+        # checkpoint would raise an illegal transition.
+        if _row_state(existing) in {OpState.FAILED, OpState.ABANDONED}:
+            await advance(
+                existing["id"], OpState.QUEUED, error="",
+                attempt=(existing.get("attempt") or 1) + 1,
+                staged_path="",
+            )
         return existing["id"]
 
     cursor = await execute(

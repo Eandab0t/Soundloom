@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 _YT_DLP_OPTS_BASE = {
     "quiet": True,
     "no_warnings": True,
-    "no_check_certificates": True,
+    # Certificate verification stays on: disabling it would make every
+    # download vulnerable to interception, including the browser cookies we
+    # send along with the request.
     "extractor_args": {"youtube": {"skip": ["dash", "mpd"]}},
     "cookiesfrombrowser": ("chrome",),
 }

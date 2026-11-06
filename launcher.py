@@ -9,8 +9,8 @@ but uses the browser the user already has, with nothing bundled. A dedicated
 user's normal browsing profile.
 
 Exit semantics: the UI already heartbeats every 10 s and backend.main's
-watchdog shuts the process down (``os._exit``) when no browser has
-heartbeated for ``shutdown_timeout`` seconds. So "user closes the window"
+watchdog shuts the process down (via uvicorn's SIGINT handler) when no browser
+has heartbeated for ``shutdown_timeout`` seconds. So "user closes the window"
 naturally becomes "server exits" - in both the app-window path and the
 plain-tab fallback. This launcher just stays alive while uvicorn runs.
 
@@ -132,7 +132,7 @@ def main() -> int:
         webbrowser.open(url)  # plain tab; heartbeat auto-shutdown still applies
 
     # Stay alive while uvicorn runs. The in-app watchdog handles exit when
-    # the window closes (no more heartbeats -> os._exit(0)).
+    # the window closes (no more heartbeats -> graceful shutdown via SIGINT).
     try:
         while thread.is_alive():
             thread.join(timeout=1.0)

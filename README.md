@@ -2,9 +2,15 @@
 
 <img src="https://repository-images.githubusercontent.com/1403714786/1959a13d-8fa5-4af4-860c-dddcc2f3a832" alt="Soundloom" width="100%">
 
+<<<<<<< HEAD
 A local music library that fills itself. Watch artists for new releases, mirror Spotify/Deezer playlists, download new music, and keep your library tidy — all on your own machine, nothing in the cloud.
 
 I built Soundloom because getting new music onto my iPod was annoyingly manual. I wanted to follow artists and have their new releases just… show up in my library, without hunting them down one by one. Soundloom does that: it watches artists, mirrors playlists, downloads what you don't already own, and keeps your metadata clean. Everything stays on your computer — no accounts, no cloud, no subscriptions.
+=======
+A local music library that fills itself. Watch artists, sync playlists, download new music, and keep your library tidy — all on your own machine, nothing in the cloud.
+
+I built Soundloom because getting new music onto my iPod was annoyingly manual. I wanted to follow artists and have their new releases just… show up in my library, without hunting them down one by one. Soundloom does that: it watches artists, mirrors playlists, downloads what you don't have yet, and keeps your metadata clean. Everything stays on your computer — no accounts, no cloud, no subscriptions.
+>>>>>>> f16c76bba8e392cda8d0442a4771fd454df3dcf5
 
 ## What it does
 
@@ -27,8 +33,8 @@ Soundloom is a desktop app. You run it locally, it opens in your browser at `htt
 ### Requirements
 
 - Python 3.12+
-- `ffmpeg` on PATH
-- `deemix` (npm, installed globally) for Deezer downloads
+- `ffmpeg` on your PATH
+- `deemix` (npm, global) for Deezer downloads
 
 ### Setup
 
@@ -56,6 +62,7 @@ The UI opens at `http://127.0.0.1:5555`. Close the browser and the server shuts 
 
 Soundloom does not auto-update. New releases go to [GitHub Releases](https://github.com/Eandab0t/Soundloom/releases). Download the new `Soundloom.exe`, replace the old one, and run it — your `data/` folder stays put.
 
+<<<<<<< HEAD
 SHA-256 checksums are provided with each release so you can verify the integrity of downloaded files.
 
 ## Support
@@ -78,3 +85,8 @@ All 880 tests pass. Detailed test documentation lives in [docs/tests/SOUNDLOOM_A
 
 - Paths are portable: `backend/config.py` derives the project root from `__file__`, and `run.bat` resolves its own directory via `%~dp0`.
 - Desktop build: `build_exe.bat` produces `dist\Soundloom\Soundloom.exe` (PyInstaller; the exe keeps its own `data/` directory next to it).
+=======
+## Support
+
+This is a personal project I maintain in my spare time. There's no support team or guaranteed response time. If something breaks, open a GitHub Issue and I'll look at it when I can.
+>>>>>>> f16c76bba8e392cda8d0442a4771fd454df3dcf5
