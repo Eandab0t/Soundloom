@@ -7,7 +7,7 @@ __pycache__/
 venv/
 *.egg
 
-# Runtime data (DB, real settings with credentials, logs, exports, backups…)
+# Runtime data (DB, real settings with credentials, logs, exports, backups.)
 # Everything in data/ is machine-local; only the placeholder example ships.
 data/*
 !data/settings.example.json
@@ -34,8 +34,8 @@ dist/
 build/
 *.exe
 
-# AI chat logs (large files)
-Ai Chats/
-
 # E-Tuner release (separate project)
 release/
+
+# Internal working documents (not for public release)
+documents/

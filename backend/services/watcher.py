@@ -274,9 +274,11 @@ async def check_artist(client: DeezerWatchClient, row: dict, settings: dict) -> 
             key = _release_key(release)
             if not key:
                 continue
+            print(f"  Processing release: {release.get('title')} (id={release.get('id')})")
 
             try:
                 detail = await client.album(int(key))
+                print(f"  Album detail for {release.get('title')}: {detail.get('title')}")
             except Exception as e:
                 logger.warning(f"Watch '{name}': could not fetch release {release.get('title')!r}: {e}")
                 continue

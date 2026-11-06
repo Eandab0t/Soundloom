@@ -7,7 +7,17 @@ from . import config
 
 logger = logging.getLogger(__name__)
 
-_db_lock = asyncio.Lock()
+_db_lock: asyncio.Lock | None = None
+_db_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_db_lock() -> asyncio.Lock:
+    global _db_locks
+    loop = asyncio.get_running_loop()
+    loop_id = id(loop)
+    if loop_id not in _db_locks:
+        _db_locks[loop_id] = asyncio.Lock()
+    return _db_locks[loop_id]
 
 # Pragmas applied once per connection. WAL lets the API read while the worker
 # writes (the old rollback journal mode blocked readers on every commit), and
@@ -191,7 +201,7 @@ async def get_db():
 
 
 async def execute(sql: str, params: tuple = ()) -> aiosqlite.Cursor:
-    async with _db_lock:
+    async with _get_db_lock():
         async with get_db() as db:
             cursor = await db.execute(sql, params)
             await db.commit()
@@ -211,7 +221,7 @@ async def executemany(sql: str, rows: list[tuple]) -> None:
     """
     if not rows:
         return
-    async with _db_lock:
+    async with _get_db_lock():
         async with get_db() as db:
             await db.executemany(sql, rows)
             await db.commit()

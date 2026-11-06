@@ -273,9 +273,9 @@ async def _pick_next_job() -> dict | None:
     not reentrant, so calling it while already holding the lock deadlocks the
     whole app on the first job.
     """
-    from ..database import _db_lock, get_db
+    from ..database import _get_db_lock, get_db
 
-    async with _db_lock:
+    async with _get_db_lock():
         async with get_db() as db:
             cursor = await db.execute(
                 """
