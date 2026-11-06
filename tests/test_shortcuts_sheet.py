@@ -37,6 +37,7 @@ DISPLAY_TO_HANDLER = {
     "S": "s",
     "R": "r",
     "Q": "q",
+    "C": "c",
 }
 
 # The same table read the other way. Both sides of the comparison below are
@@ -107,8 +108,8 @@ class TestSheetMatchesTheHandler:
         """If setupKeys moves, this file silently stops testing anything."""
         text = PLAYER.read_text(encoding="utf-8")
         assert "setupKeys() {" in text, "setupKeys moved; update this test"
-        assert len(_handler_keys()) == 11, (
-            f"expected the 11 documented bindings, found {sorted(_handler_keys())}"
+        assert len(_handler_keys()) == 12, (
+            f"expected the 12 documented bindings, found {sorted(_handler_keys())}"
         )
 
     def test_every_binding_is_documented(self):

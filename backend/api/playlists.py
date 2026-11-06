@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .. import config
-from ..database import fetch_all, fetch_one, execute
+from ..database import fetch_all, fetch_one, execute, db_transaction
 from ..services import playlists as svc
 from ..services import streaming_auth
 
@@ -174,19 +174,27 @@ async def import_from_url(body: ImportUrlBody):
     if not raw:
         raise HTTPException(422, "That playlist has no tracks (or it is not public).")
 
-    cursor = await execute(
-        "INSERT INTO playlists (name, origin, origin_ref) VALUES (?, ?, ?)",
-        (name, f"{source_type}_url", source_ref),
-    )
-    pid = cursor.lastrowid
-    for pos, t in enumerate(raw, 1):
-        await execute(
-            "INSERT INTO playlist_tracks (playlist_id, position, title, artist, album, "
-            "duration, ext_id, ext_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (pid, pos, t.get("title") or "", t.get("artist") or "",
-             t.get("album") or "", float(t.get("duration") or 0.0),
-             str(t.get("id") or ""), source_type),
+    # Insert the playlist and all its tracks in one atomic transaction: a
+    # crash part-way through must not leave a half-imported playlist.
+    rows = [
+        (pos, t.get("title") or "", t.get("artist") or "",
+         t.get("album") or "", float(t.get("duration") or 0.0),
+         str(t.get("id") or ""), source_type)
+        for pos, t in enumerate(raw, 1)
+    ]
+    async with db_transaction() as db:
+        cursor = await db.execute(
+            "INSERT INTO playlists (name, origin, origin_ref) VALUES (?, ?, ?)",
+            (name, f"{source_type}_url", source_ref),
         )
+        pid = cursor.lastrowid
+        if rows:
+            await db.executemany(
+                "INSERT INTO playlist_tracks (playlist_id, position, title, artist, album, "
+                "duration, ext_id, ext_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(pid, *r) for r in rows],
+            )
+
     await svc.refresh_local_matches(pid)
     counts = await fetch_one(
         "SELECT COUNT(*) AS n, SUM(CASE WHEN track_id IS NOT NULL THEN 1 ELSE 0 END) AS m "
@@ -437,14 +445,19 @@ async def disconnect(platform: str):
 
 
 @auth_router.get("/callback")
-async def oauth_callback(code: str = "", state: str = "", error: str = ""):
-    """The platform redirects here; serve a tiny page that POSTs the code."""
-    if error:
-        return HTMLResponse(_CALLBACK_HTML.replace("__MSG__", f"Authorization failed: {error}"))
-    if not code or not state:
-        return HTMLResponse(_CALLBACK_HTML.replace("__MSG__", "Missing code/state in callback."))
+async def oauth_callback():
+    """The platform redirects here; serve the static exchange page.
+
+    The page reads code/state from its own query string in the browser. Nothing
+    from the query is interpolated into the HTML or JavaScript, so a crafted
+    ``code``/``error`` parameter cannot inject markup or script.
+    """
     return HTMLResponse(
-        _CALLBACK_HTML.replace("__CODE__", code).replace("__STATE__", state)
+        _CALLBACK_HTML,
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+        },
     )
 
 
@@ -471,11 +484,25 @@ _CALLBACK_HTML = """<!DOCTYPE html>
 <script>
   const msg = document.getElementById('msg');
   async function run() {
+    // Read the redirect parameters in the browser; never interpolate them
+    // into this page server-side.
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code') || '';
+    const state = params.get('state') || '';
+    const error = params.get('error') || '';
+    if (error) {
+      msg.textContent = 'Authorization failed: ' + error;
+      return;
+    }
+    if (!code || !state) {
+      msg.textContent = 'Missing code/state in callback.';
+      return;
+    }
     try {
       const r = await fetch('/api/connections/callback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: '__CODE__', state: '__STATE__' }),
+        body: JSON.stringify({ code, state }),
       });
       const j = await r.json().catch(() => ({}));
       if (r.ok) {

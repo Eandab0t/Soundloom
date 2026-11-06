@@ -129,8 +129,18 @@ async def begin_operation(op_key: str, *, job_id: int | None = None,
     same row rather than creating a duplicate, so a retried job does not fork
     into two competing operations.
     """
-    existing = await fetch_one("SELECT id FROM operations WHERE op_key=?", (op_key,))
+    existing = await fetch_one("SELECT * FROM operations WHERE op_key=?", (op_key,))
     if existing:
+        # A retried job reattaches to its journal row. If that row ended in a
+        # terminal outcome (cancelled, exhausted, discarded), move it back to
+        # the front so the pipeline can advance it again; otherwise the first
+        # checkpoint would raise an illegal transition.
+        if _row_state(existing) in {OpState.FAILED, OpState.ABANDONED}:
+            await advance(
+                existing["id"], OpState.QUEUED, error="",
+                attempt=(existing.get("attempt") or 1) + 1,
+                staged_path="",
+            )
         return existing["id"]
 
     cursor = await execute(
@@ -337,7 +347,14 @@ async def index_file(file_path: str, metadata: dict, source_url: str = "",
     # references it.
     from .acquisition import record as record_acquisition
 
-    source_name = source_url.split(":", 1)[0] if source_url else ""
+    # Only a real URL has a scheme. Splitting on the first colon also
+    # splits a Windows path, which is how a local acquisition ended up
+    # recorded as source="E" - a drive letter wearing a provenance
+    # label. One character of drive is also never a scheme, since a
+    # scheme is at least two characters before the colon.
+    scheme, sep, _ = (source_url or "").partition(":")
+    source_name = scheme if sep and len(scheme) > 1 else (
+        "local" if source_url else "")
     await record_acquisition(
         track_id=track_id,
         file_path=file_path,

@@ -207,6 +207,7 @@ def auth_config(monkeypatch):
             base.update(partial)
     monkeypatch.setattr(streaming_auth, "config", _Stub())
     streaming_auth._pending.clear()
+    streaming_auth._refresh_locks.clear()
     return base
 
 
@@ -298,3 +299,27 @@ class TestAccessTokenRefresh:
     async def test_raises_when_never_connected(self):
         with pytest.raises(ValueError):
             await streaming_auth.get_access_token("soundcloud")
+
+    async def test_concurrent_callers_share_one_refresh(self, monkeypatch):
+        """SoundCloud refresh tokens are single-use; eight callers, one POST."""
+        import asyncio
+        import time
+        streaming_auth.config.update({
+            "spotify_user_token": {"access": "dead", "refresh": "rtok",
+                                   "expiry": time.time() - 10}
+        })
+        calls = 0
+
+        async def fake_request(platform, form):
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.01)
+            return {"access_token": "fresh", "refresh_token": "rtok2",
+                    "expires_in": 3600}
+
+        monkeypatch.setattr(streaming_auth, "_token_request", fake_request)
+        tokens = await asyncio.gather(
+            *[streaming_auth.get_access_token("spotify") for _ in range(8)]
+        )
+        assert tokens == ["fresh"] * 8
+        assert calls == 1, "the refresh token was spent more than once"

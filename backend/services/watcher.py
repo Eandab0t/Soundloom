@@ -16,6 +16,12 @@ Release detection is deliberately generous: singles count, not just albums.
 The `watch_backfill_days` setting caps only the *first* check for an artist so
 that following somebody with 100+ releases does not enqueue their entire back
 catalogue on day one.
+
+`auto_download` is per artist: scheduled checks still track releases (so the
+"last checked" state stays current) but only enqueue tracks when the row has
+auto-download enabled. An explicit manual check is a user action, so it is
+allowed to enqueue even when auto-download is off; the API routes pass
+`manual=True` for that case.
 """
 import asyncio
 import json
@@ -89,7 +95,13 @@ class DeezerWatchClient:
             return await resp.json(content_type=None)
 
     async def search_artist(self, name: str) -> dict | None:
-        """Find the Deezer artist that best matches `name`."""
+        """Resolve `name` to exactly one Deezer artist.
+
+        Only a unique exact (normalised) name match is accepted. Deezer's
+        search happily returns covers, karaoke acts and same-named artists;
+        picking the most popular candidate silently downloaded the wrong
+        artist. Ambiguity is surfaced instead of guessed.
+        """
         from urllib.parse import quote
 
         data = await self.get(f"/search/artist?q={quote(name)}&limit=10")
@@ -98,11 +110,19 @@ class DeezerWatchClient:
             return None
 
         target = normalize_text(name)
-        # Exact normalised name wins; otherwise the biggest fanbase is the
-        # best guess, which is right far more often than the first result.
-        exact = [c for c in candidates if normalize_text(c.get("name", "")) == target]
-        pool = exact or candidates
-        return max(pool, key=lambda c: c.get("nb_fan", 0))
+        exact = {
+            str(c.get("id")): c
+            for c in candidates
+            if c.get("id") is not None and normalize_text(c.get("name", "")) == target
+        }
+        if len(exact) == 1:
+            return next(iter(exact.values()))
+        if len(exact) > 1:
+            raise LookupError(
+                f"Deezer returned {len(exact)} artists named '{name}'; "
+                "refusing to guess"
+            )
+        return None
 
     async def releases(self, artist_id: int) -> list[dict]:
         """Every release for an artist, newest first, fully paginated."""
@@ -218,12 +238,41 @@ async def _enqueue(url: str, title: str, artist: str, album: str,
 # Core per-artist check
 # --------------------------------------------------------------------------
 
-async def check_artist(client: DeezerWatchClient, row: dict, settings: dict) -> int:
-    """Check one watched artist. Returns the number of tracks enqueued."""
+async def _save_check_state(watch_id: int, all_seen: list[str], known: list[str],
+                            newest_date: str, enqueued: int) -> None:
+    """Persist what this pass saw.
+
+    Everything currently visible is remembered, not just what we acted on, or
+    the next pass would rediscover the same untouched releases.
+    """
+    merged = list(dict.fromkeys(all_seen + known))[:_MAX_KNOWN_RELEASES]
+    await execute(
+        """
+        UPDATE watched_artists
+           SET last_checked = ?,
+               known_releases = ?,
+               last_new_release = ?,
+               last_enqueued = ?,
+               last_error = ''
+         WHERE id = ?
+        """,
+        (_iso(_utcnow()), json.dumps(merged), newest_date, enqueued, watch_id),
+    )
+
+
+async def check_artist(client: DeezerWatchClient, row: dict, settings: dict,
+                       *, manual: bool = False) -> int:
+    """Check one watched artist. Returns the number of tracks enqueued.
+
+    Scheduled checks honour the row's `auto_download` flag. `manual=True` is
+    used by the "check now" endpoints: the user explicitly asked, so new
+    tracks are queued even for artists with auto-download switched off.
+    """
     watch_id = row["id"]
     name = row["artist_name"]
     known = _load_known(row.get("known_releases"))
     first_run = not known
+    should_enqueue = manual or bool(row.get("auto_download"))
     quality = row.get("quality_profile") or settings.get("default_quality", "balanced")
     output_format = settings.get("default_format", "mp3")
 
@@ -264,6 +313,21 @@ async def check_artist(client: DeezerWatchClient, row: dict, settings: dict) -> 
 
     enqueued = 0
     newest_date = row.get("last_new_release") or ""
+    for release in candidates:
+        when = _parse_release_date(release.get("release_date"))
+        if when and when.isoformat() > newest_date:
+            newest_date = when.isoformat()
+
+    if candidates and not should_enqueue:
+        # Tracking-only pass: remember what is new but do not fetch album
+        # details or create jobs. Enabling auto-download later resets the
+        # known list (see api/watch.py), so nothing is lost.
+        logger.info(
+            f"Watch '{name}': {len(candidates)} new release(s) detected, "
+            "auto-download is off"
+        )
+        await _save_check_state(watch_id, all_seen, known, newest_date, 0)
+        return 0
 
     if candidates:
         for release in candidates:
@@ -314,22 +378,7 @@ async def check_artist(client: DeezerWatchClient, row: dict, settings: dict) -> 
             if when and when.isoformat() > newest_date:
                 newest_date = when.isoformat()
 
-    # Remember everything currently visible, not just what we acted on, or the
-    # next pass would rediscover the same untouched releases.
-    merged = list(dict.fromkeys(all_seen + known))[:_MAX_KNOWN_RELEASES]
-
-    await execute(
-        """
-        UPDATE watched_artists
-           SET last_checked = ?,
-               known_releases = ?,
-               last_new_release = ?,
-               last_enqueued = ?,
-               last_error = ''
-         WHERE id = ?
-        """,
-        (_iso(_utcnow()), json.dumps(merged), newest_date, enqueued, watch_id),
-    )
+    await _save_check_state(watch_id, all_seen, known, newest_date, enqueued)
 
     if enqueued:
         await emit("watch_update", {
@@ -346,8 +395,13 @@ async def check_artist(client: DeezerWatchClient, row: dict, settings: dict) -> 
 # Poller lifecycle
 # --------------------------------------------------------------------------
 
-async def poll_once(force: bool = False) -> int:
-    """Run one polling pass. Returns the total number of tracks enqueued."""
+async def poll_once(force: bool = False, manual: bool = False) -> int:
+    """Run one polling pass. Returns the total number of tracks enqueued.
+
+    `force` ignores the per-artist interval. `manual` marks the pass as an
+    explicit user action, allowing tracks to be queued even for artists whose
+    `auto_download` flag is off.
+    """
     settings = config.get_all()
     if not settings.get("watch_enabled", True):
         logger.debug("Watcher disabled via settings")
@@ -389,7 +443,7 @@ async def poll_once(force: bool = False) -> int:
         client = DeezerWatchClient(session)
         for row in due:
             try:
-                total += await check_artist(client, row, settings)
+                total += await check_artist(client, row, settings, manual=manual)
             except Exception as e:
                 logger.warning(f"Watcher: check failed for '{row.get('artist_name')}': {e}")
                 await execute(

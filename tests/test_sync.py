@@ -179,7 +179,7 @@ class TestSyncPlaylist:
             pid = await _add_sync()
             tracks = [_track("s1", "One"), _track("s2", "Two"), _track("s3", "Three")]
             monkeypatch.setattr(S, "SpotifyClient", make_client_cls({"name": "My Mix"}, tracks))
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["enqueued"] == 3
             jobs = await fetch_all("SELECT * FROM jobs")
@@ -197,8 +197,8 @@ class TestSyncPlaylist:
             pid = await _add_sync()
             tracks = [_track("s1", "One"), _track("s2", "Two")]
             monkeypatch.setattr(S, "SpotifyClient", make_client_cls({"name": "My Mix"}, tracks))
-            first = await S.sync_playlist(pid)
-            second = await S.sync_playlist(pid)
+            first = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
+            second = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert first["enqueued"] == 2
             assert second["enqueued"] == 0, "known ids must never re-enqueue"
@@ -221,7 +221,7 @@ class TestSyncPlaylist:
                 S, "SpotifyClient",
                 make_client_cls({"name": "My Mix"}, [_track("s1", "One"), _track("s2", "Two")]),
             )
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["owned"] == 1
             assert result["enqueued"] == 1
@@ -242,7 +242,7 @@ class TestSyncPlaylist:
                 S, "SpotifyClient",
                 make_client_cls({"name": "My Mix"}, [_track("s1", "One"), _track("s2", "Two")]),
             )
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["already_queued"] == 1
             assert result["enqueued"] == 1
@@ -260,7 +260,7 @@ class TestSyncPlaylist:
                 S, "SpotifyClient",
                 make_client_cls({"name": "My Mix"}, [_track("s1", "One"), _track("s2", "One")]),
             )
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["enqueued"] == 1
             assert result["already_queued"] == 1
@@ -277,7 +277,7 @@ class TestSyncPlaylist:
             pid = await _add_sync()
             tracks = [_track(f"s{i}", f"Song {i}") for i in range(5)]
             monkeypatch.setattr(S, "SpotifyClient", make_client_cls({"name": "My Mix"}, tracks))
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["enqueued"] == 2
             assert any(
@@ -296,7 +296,7 @@ class TestSyncPlaylist:
             pid = await _add_sync()
             tracks = [_track(f"s{i}", f"Song {i}") for i in range(5)]
             monkeypatch.setattr(S, "SpotifyClient", make_client_cls({"name": "My Mix"}, tracks))
-            result = await S.sync_playlist(pid)
+            result = await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             assert result["enqueued"] == 2
             assert any("budget" in e.lower() for e in result["errors"])
@@ -313,7 +313,7 @@ class TestSyncPlaylist:
                 S, "SpotifyClient",
                 make_client_cls({"name": "Stella Mix"}, [_track("s1"), _track("s2")]),
             )
-            await S.sync_playlist(pid)
+            await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             row = await fetch_one("SELECT * FROM synced_playlists WHERE id=?", (pid,))
             assert json.loads(row["last_track_ids"]) == ["s1", "s2"]
@@ -333,7 +333,7 @@ class TestSyncPlaylist:
                 S, "DeezerClient",
                 make_client_cls({"title": "Deezer Mix"}, [_track("d1", "Boston", "Stella Lefty")]),
             )
-            await S.sync_playlist(pid)
+            await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             row = await fetch_one("SELECT * FROM synced_playlists WHERE id=?", (pid,))
             assert row["name"] == "Deezer Mix"
@@ -348,7 +348,7 @@ class TestSyncPlaylist:
             pid = await _add_sync()
             monkeypatch.setattr(S, "SpotifyClient", make_client_cls({}, [], fail=True))
             with pytest.raises(RuntimeError):
-                await S.sync_playlist(pid)
+                await S.sync_playlist(pid, S._MAX_ENQUEUES_PER_PASS)
 
             row = await fetch_one("SELECT * FROM synced_playlists WHERE id=?", (pid,))
             assert "platform exploded" in row["last_error"]
@@ -361,7 +361,7 @@ class TestSyncPlaylist:
         await init_db()
         try:
             with pytest.raises(ValueError):
-                await sync_mod.sync_playlist(9999)
+                await sync_mod.sync_playlist(9999, sync_mod._MAX_ENQUEUES_PER_PASS)
         finally:
             await close_db()
 

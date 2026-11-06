@@ -42,6 +42,7 @@ export const SHORTCUT_GROUPS = [
       { keys: ['M'], label: 'Mute / unmute' },
       { keys: ['S'], label: 'Shuffle — keep the queue, change the play order' },
       { keys: ['R'], label: 'Repeat — cycles off, all, then one' },
+      { keys: ['C'], label: 'Collapse / expand the player bar' },
     ],
   },
   {

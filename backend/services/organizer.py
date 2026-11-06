@@ -13,7 +13,8 @@ import shutil
 import uuid
 from pathlib import Path
 
-from ..validation import validate_folder_template, sanitize_filename
+from ..errors import ValidationError
+from ..validation import validate_folder_template, sanitize_filename, validate_absolute_path
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,14 @@ async def organize_file(source_path: str, metadata: dict, library_path: str,
     """
     if not source_path or not Path(source_path).exists():
         raise FileNotFoundError(f"Source file not found: {source_path}")
+
+    # Defense in depth: settings validates library_path as absolute, but this
+    # function is also reachable directly. A relative library root would make
+    # every placement resolve against the CWD instead of the user's library.
+    try:
+        library_path = validate_absolute_path(library_path, "library_path")
+    except ValidationError as e:
+        raise ValueError(str(e)) from e
 
     ext = Path(source_path).suffix
     rel_path = render_template(folder_template, metadata)

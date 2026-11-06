@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use Soundloom, please cite it as below:"
+authors:
+  - family-names: "Eandab0t"
+    given-names: ""
+title: "Soundloom"
+version: 0.2.2
+date-released: 2026-11-05
+url: "https://github.com/Eandab0t/Soundloom"
+repository-code: "https://github.com/Eandab0t/Soundloom"
+abstract: >
+  Soundloom is a local, desktop-first music-library manager that watches
+  artists for new releases, mirrors Spotify/Deezer playlists, downloads
+  music via per-source adapters, and keeps metadata and covers clean.
+  Everything is local: your music stays on your disk, the database is one
+  SQLite file in data/, and the server binds to 127.0.0.1 only.
+keywords:
+  - music-library
+  - playlist-sync
+  - artist-watch
+  - audio-downloader
+  - metadata-cleanup
+  - local-first
+license: MIT
+identifiers:
+  - type: url
+    value: "https://github.com/Eandab0t/Soundloom"

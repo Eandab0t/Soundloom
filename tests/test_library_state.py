@@ -244,6 +244,41 @@ class TestIndexingProvenance:
         finally:
             await close_db()
 
+    async def test_a_windows_path_is_not_mistaken_for_a_url_scheme(self, env):
+        """The drive letter used to become the provenance label.
+
+        `source_url.split(":", 1)[0]` reads the first colon as a scheme
+        separator, so a local path recorded `source="E"` - a drive letter
+        wearing a provenance label, indistinguishable from a real source
+        named "E". `source` is the column that says which acquisition
+        channel produced a file, so it has to mean something.
+        """
+        await init_db()
+        try:
+            from backend.services import operations
+
+            payload = b"bytes of a local track"
+            path = _write(env / "Artist" / "Album" / "01 - Local.mp3", payload)
+            # A forward-slash drive path: Windows accepts it, and it
+            # exercises the identical parsing - the first colon is
+            # still the one after the drive letter.
+            local_url = "E:/Users/eacam/Music/source/take.mp3"
+
+            tid = await operations.index_file(
+                path, {"title": "Local", "artist": "Artist"},
+                source_url=local_url,
+            )
+            rows = await fetch_all(
+                "SELECT source, source_url FROM acquisition WHERE track_id=?",
+                (tid,))
+            assert len(rows) == 1
+            assert rows[0]["source"] == "local", \
+                f"drive letter became the provenance label: {rows[0]['source']!r}"
+            assert rows[0]["source_url"] == local_url, \
+                "the full origin is still recorded verbatim"
+        finally:
+            await close_db()
+
     async def test_reindex_keeps_the_row_id_and_its_archive_state(self, env):
         """A re-index means the file came back, not that the user's mind
         changed. INSERT OR REPLACE would mint a new id (orphaning every

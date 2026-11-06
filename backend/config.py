@@ -17,6 +17,10 @@ else:
 
 APP_VERSION = "0.2.2"
 
+# --- Playlist sync defaults ---
+
+PLAYLIST_SYNC_DEFAULT_NAME = "Soundloom Sync"
+
 DATA_DIR = ROOT / "data"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 DB_PATH = DATA_DIR / "library.db"
@@ -65,6 +69,8 @@ DEFAULTS = {
     "sync_enabled": True,
     "sync_interval": 21600,          # seconds between scheduled sync passes (6h)
     "sync_max_tracks": 200,          # per playlist per pass
+    # Default name for a freshly created playlist-sync intent.
+    "playlist_sync_default_name": "Soundloom Sync",
     "spotify_redirect_uri": "http://127.0.0.1:5555/api/connections/callback",
     "spotify_user_token": "",        # {access, refresh, expiry} from the user OAuth flow
     "soundcloud_client_id": "",

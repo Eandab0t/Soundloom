@@ -357,7 +357,105 @@ MIGRATIONS: list[Migration] = [
             ADD COLUMN succeeded_files INTEGER NOT NULL DEFAULT 0;
         """,
     ),
+    Migration(
+        version=15,
+        name="forensic_observations",
+        # An append-only log of what the filesystem did, which is a
+        # different shape of fact from `file_status`.
+        #
+        # `file_status` is a snapshot and says a file is missing *now*;
+        # when it changes, the previous value is gone. An investigation
+        # needs the opposite: the sequence and the timing, because the
+        # question is always which transition preceded the disappearance,
+        # never what the current answer is.
+        #
+        # Rows are appended only on a transition. One row per track per
+        # scan would just be a second tracks table with the interesting
+        # rows buried in the rest.
+        #
+        # `canary` holds specimens - files acquired through the real
+        # pipeline whose bytes were measured before anything happened to
+        # them - so that a later absence is attributable to something.
+        sql="""
+        CREATE TABLE IF NOT EXISTS file_observation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            observed_at TEXT NOT NULL DEFAULT (datetime('now')),
+            file_path TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL DEFAULT 'present',
+            detail TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_observation_track
+            ON file_observation(track_id, id);
+        CREATE INDEX IF NOT EXISTS idx_file_observation_state
+            ON file_observation(state, id);
+        CREATE TABLE IF NOT EXISTS canary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER,
+            label TEXT DEFAULT '',
+            job_id TEXT DEFAULT '',
+            expected_path TEXT NOT NULL,
+            sha256 TEXT NOT NULL DEFAULT '',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            registered_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_verified_at TEXT,
+            last_seen_path TEXT DEFAULT '',
+            state TEXT NOT NULL DEFAULT 'present'
+        );
+        CREATE INDEX IF NOT EXISTS idx_canary_state ON canary(state);
+        """,
+    ),
+    Migration(
+        version=16,
+        name="playlist_sync_tables",
+        sql="""
+    CREATE TABLE IF NOT EXISTS playlist_syncs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        source_type TEXT DEFAULT 'spotify',
+        source_ref TEXT DEFAULT '',
+        url TEXT DEFAULT '',
+        auto_sync INTEGER DEFAULT 0,
+        sync_interval INTEGER DEFAULT 0,
+        quality_profile TEXT DEFAULT 'balanced',
+        last_synced TEXT,
+        last_track_ids TEXT DEFAULT '[]',
+        last_error TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL REFERENCES playlist_syncs(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL DEFAULT 'add',
+        status TEXT NOT NULL DEFAULT 'pending',
+        started_at TEXT,
+        finished_at TEXT,
+        summary TEXT DEFAULT '{}',
+        error TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS sync_track_mapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        playlist_id INTEGER NOT NULL,
+        source_key TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        local_track_id INTEGER,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sync_runs_playlist ON sync_runs(playlist_id);
+    CREATE INDEX IF NOT EXISTS idx_sync_tracks_playlist_key
+        ON sync_track_mapping(playlist_id, source_key, source_id);
+    CREATE INDEX IF NOT EXISTS idx_sync_tracks_local
+        ON sync_track_mapping(local_track_id);
+    """
+    ),
 ]
+
 
 
 async def run_migrations(db) -> int:

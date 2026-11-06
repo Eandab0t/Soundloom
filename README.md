@@ -1,25 +1,36 @@
 # Soundloom
 
-**Weave new music into your library.** A local music library that fills itself:
-watch artists for new releases, mirror Spotify/Deezer playlists, download with
-per-source adapters, and keep metadata and covers clean.
+<img src="https://repository-images.githubusercontent.com/1403714786/1959a13d-8fa5-4af4-860c-dddcc2f3a832" alt="Soundloom" width="100%">
 
-- **Download** — Deezer (deemix), YouTube (yt-dlp), and SoundCloud adapters
-- **Sync** — Soundiiz-style: keep a Spotify or Deezer playlist mirrored into
-  your library on a schedule, downloading what you don't already own
-- **Watch** — auto-download new releases from followed artists
-- **Identify / Clean up / Convert** — metadata fixes against MusicBrainz and
-  Spotify, cover-art fetching, duplicate resolution, format conversion
-- **Playlist Hub** — import playlists (Spotify, Deezer, iTunes XML, M3U, CSV)
-  and export to M3U8, CSV, iTunes XML, JSON, Spotify, or SoundCloud
+A local music library that fills itself. Watch artists, sync playlists, download new music, and keep your library tidy — all on your own machine, nothing in the cloud.
 
-## Requirements
+I built Soundloom because getting new music onto my iPod was annoyingly manual. I wanted to follow artists and have their new releases just… show up in my library, without hunting them down one by one. Soundloom does that: it watches artists, mirrors playlists, downloads what you don't have yet, and keeps your metadata clean. Everything stays on your computer — no accounts, no cloud, no subscriptions.
+
+## What it does
+
+**Watch artists** — Follow an artist and Soundloom checks for new albums, EPs, and singles, then downloads them automatically.
+
+**Sync playlists** — Point it at a Spotify or Deezer playlist and Soundloom downloads anything you don't already own, keeping it up to date on a schedule.
+
+**Add music** — Paste a YouTube, SoundCloud, or Deezer URL, or point it at a local file. It downloads, converts, tags, and files it away.
+
+**Identify & fix tags** — Look up your tracks against MusicBrainz, preview the changes, and apply them when you're happy.
+
+**Convert audio** — Runs FFmpeg in your browser. Files never leave your machine.
+
+**Play** — There's a persistent player that survives tab switches, so your music keeps going while you browse.
+
+## How it works
+
+Soundloom is a desktop app. You run it locally, it opens in your browser at `http://127.0.0.1:5555`, and everything happens on your machine. Your music library, settings, and database all live in a `data/` folder next to the app — nothing leaves your computer.
+
+### Requirements
 
 - Python 3.12+
-- `ffmpeg` on PATH
-- `deemix` (npm, installed globally) for Deezer downloads
+- `ffmpeg` on your PATH
+- `deemix` (npm, global) for Deezer downloads
 
-## Setup
+### Setup
 
 ```bat
 python -m venv .venv
@@ -28,33 +39,23 @@ copy data\settings.example.json data\settings.json
 run.bat
 ```
 
-The UI opens at `http://127.0.0.1:5555` and auto-shuts down when the browser
-closes (heartbeat watchdog).
+The UI opens at `http://127.0.0.1:5555`. Close the browser and the server shuts itself down after a short timeout.
 
-## Tests
+## What it does *not* do
 
-```bat
-.venv\Scripts\python.exe -m pytest tests -q
-```
+- It does not stream music. It downloads files to your library.
+- It does not host anything online. Your library stays on your disk.
+- It does not require an account. There is no login.
+- It does not touch your music unless you tell it to. Scanning is read-only; downloads go where you point them.
 
-## Connecting Spotify / SoundCloud (Playlist Hub export)
+## License
 
-Create an API app at developer.spotify.com (free) or soundcloud.com (API
-access requires Artist Pro), put the client id + secret in Settings, and
-register this redirect URI:
+[MIT](LICENSE) — use it, modify it, share it.
 
-```
-http://127.0.0.1:5555/api/connections/callback
-```
+## Updates
 
-Then hit Connect on the Playlists tab to authorize your account.
+Soundloom does not auto-update. New releases go to [GitHub Releases](https://github.com/Eandab0t/Soundloom/releases). Download the new `Soundloom.exe`, replace the old one, and run it — your `data/` folder stays put.
 
-## Notes
+## Support
 
-- `data/` is machine-local and git-ignored: it holds the SQLite library DB,
-  the real `settings.json` (credentials), logs, and exports. Only
-  `data/settings.example.json` is tracked.
-- Paths are portable: `backend/config.py` derives the project root from
-  `__file__`, and `run.bat` resolves its own directory via `%~dp0`.
-- Desktop build: `build_exe.bat` produces `dist\Soundloom\Soundloom.exe`
-  (PyInstaller; the exe keeps its own `data/` directory next to it).
+This is a personal project I maintain in my spare time. There's no support team or guaranteed response time. If something breaks, open a GitHub Issue and I'll look at it when I can.

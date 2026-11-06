@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from .. import config
 from ..database import fetch_all, fetch_one, execute
 from ..validation import validate_url
-from ..services.sync import parse_playlist_url, sync_playlist, poll_once
+from ..services.sync import parse_playlist_url, sync_playlist, poll_once, _MAX_ENQUEUES_PER_PASS
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ async def add_synced(data: dict):
     enqueued = 0
     if data.get("sync_now", True):
         try:
-            result = await sync_playlist(pid)
+            result = await sync_playlist(pid, _MAX_ENQUEUES_PER_PASS)
             enqueued = result["enqueued"]
         except Exception as e:
             logger.warning(f"Initial sync failed for playlist {pid}: {e}")
@@ -103,7 +103,7 @@ async def update_synced(playlist_id: int, data: dict):
 @router.post("/{playlist_id}/sync")
 async def sync_now(playlist_id: int):
     try:
-        result = await sync_playlist(playlist_id)
+        result = await sync_playlist(playlist_id, _MAX_ENQUEUES_PER_PASS)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -115,9 +115,16 @@ async def sync_now(playlist_id: int):
 async def sync_all():
     rows = await fetch_all("SELECT id FROM synced_playlists")
     results = []
+    budget = _MAX_ENQUEUES_PER_PASS
     for row in rows:
+        if budget <= 0:
+            results.append({"playlist_id": row["id"], "enqueued": 0,
+                            "error": "pass budget exhausted"})
+            continue
         try:
-            results.append(await sync_playlist(row["id"]))
+            result = await sync_playlist(row["id"], budget)
+            results.append(result)
+            budget = result.get("budget_remaining", budget)
         except Exception as e:
             results.append({"playlist_id": row["id"], "error": str(e)})
     return {"results": results}

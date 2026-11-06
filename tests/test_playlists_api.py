@@ -35,6 +35,7 @@ def hermetic_auth(monkeypatch):
 
     monkeypatch.setattr(streaming_auth, "config", _Stub())
     streaming_auth._pending.clear()
+    streaming_auth._refresh_locks.clear()
     return base
 
 
@@ -366,6 +367,18 @@ class TestConnections:
             assert err.value.status_code == 400
         finally:
             await close_db()
+
+    async def test_callback_page_does_not_reflect_query_parameters(self, pl_db):
+        from backend.api.playlists import oauth_callback
+        response = await oauth_callback()
+        body = response.body.decode()
+        # The page reads the query string client-side instead of interpolating
+        # code/state/error into HTML or JavaScript.
+        assert "URLSearchParams(window.location.search)" in body
+        assert "__CODE__" not in body and "__STATE__" not in body
+        assert "</script><script>alert(1)</script>" not in body
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "no-referrer"
 
     async def test_disconnect(self, pl_db):
         from backend.database import init_db, close_db

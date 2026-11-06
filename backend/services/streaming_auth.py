@@ -18,10 +18,12 @@ Security notes:
   * Tokens live in the local settings file beside the rest of the user's
     configuration; they are never logged.
 """
+import asyncio
 import base64
 import hashlib
 import secrets
 import time
+from urllib.parse import urlencode
 
 import aiohttp
 
@@ -37,6 +39,19 @@ _HANDSHAKE_TIMEOUT = aiohttp.ClientTimeout(total=30)
 # code -> (verifier, platform, created_at); lives only for the redirect round-trip.
 _pending: dict[str, dict] = {}
 _PENDING_TTL = 600.0
+
+# One refresh at a time per platform. SoundCloud refresh tokens are
+# single-use: two concurrent refreshes both send the old token, one succeeds,
+# the other invalidates the session and the user has to reconnect.
+_refresh_locks: dict[str, asyncio.Lock] = {}
+
+
+def _refresh_lock(platform: str) -> asyncio.Lock:
+    lock = _refresh_locks.get(platform)
+    if lock is None:
+        lock = asyncio.Lock()
+        _refresh_locks[platform] = lock
+    return lock
 
 
 def _b64url(data: bytes) -> str:
@@ -103,24 +118,22 @@ def begin_auth(platform: str) -> dict:
     for s in [s for s, v in _pending.items() if now - v["created"] > _PENDING_TTL]:
         _pending.pop(s, None)
 
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "code_challenge_method": "S256",
+        "code_challenge": challenge,
+        "state": state,
+    }
     if platform == "spotify":
-        url = (
-            f"{SPOTIFY_AUTHORIZE_URL}?client_id={client_id}"
-            f"&response_type=code&redirect_uri={redirect_uri}"
-            f"&code_challenge_method=S256&code_challenge={challenge}"
-            f"&state={state}"
-            "&scope=playlist-modify-public%20playlist-modify-private"
-        )
+        params["scope"] = "playlist-modify-public playlist-modify-private"
+        base = SPOTIFY_AUTHORIZE_URL
     elif platform == "soundcloud":
-        url = (
-            f"{SOUNDCLOUD_AUTHORIZE_URL}?client_id={client_id}"
-            f"&response_type=code&redirect_uri={redirect_uri}"
-            f"&code_challenge_method=S256&code_challenge={challenge}"
-            f"&state={state}"
-        )
+        base = SOUNDCLOUD_AUTHORIZE_URL
     else:
         raise ValueError(f"Unknown platform: {platform}")
-    return {"auth_url": url, "state": state}
+    return {"auth_url": f"{base}?{urlencode(params)}", "state": state}
 
 
 def platform_for_state(state: str) -> str:
@@ -180,30 +193,39 @@ async def _token_request(platform: str, form: dict) -> dict:
 
 
 async def get_access_token(platform: str) -> str:
-    """A live user access token, refreshing first when needed."""
-    raw = config.get(_settings_key(platform), "") or ""
-    if not isinstance(raw, dict) or not (raw.get("access") or raw.get("refresh")):
-        raise ValueError(
-            f"Not connected to {platform}. Connect your account from the Playlists tab first."
-        )
-    if raw.get("access") and time.time() < float(raw.get("expiry") or 0):
-        return raw["access"]
-    refresh = raw.get("refresh", "")
-    if not refresh:
-        raise ValueError(
-            f"{platform.capitalize()} session expired without a refresh token. Reconnect."
-        )
-    payload = await _token_request(platform, {
-        "grant_type": "refresh_token",
-        "client_id": _creds(platform)[0],
-        "client_secret": _creds(platform)[1],
-        "refresh_token": refresh,
-    })
-    store = {
-        "access": payload.get("access_token", ""),
-        # SoundCloud refresh tokens are single-use; Spotify usually re-sends one.
-        "refresh": payload.get("refresh_token", "") or refresh,
-        "expiry": _expiry_from(payload),
-    }
-    config.update({_settings_key(platform): store})
-    return store["access"]
+    """A live user access token, refreshing first when needed.
+
+    The whole read-refresh-write sequence is serialised per platform, and the
+    token is re-read after acquiring the lock. A second caller that queued
+    behind a refresh therefore sees the fresh token and returns it instead of
+    spending the (often single-use) refresh token a second time.
+    """
+    key = _settings_key(platform)
+    async with _refresh_lock(platform):
+        raw = config.get(key, "") or ""
+        if not isinstance(raw, dict) or not (raw.get("access") or raw.get("refresh")):
+            raise ValueError(
+                f"Not connected to {platform}. Connect your account from the Playlists tab first."
+            )
+        if raw.get("access") and time.time() < float(raw.get("expiry") or 0):
+            return raw["access"]
+
+        refresh = raw.get("refresh", "")
+        if not refresh:
+            raise ValueError(
+                f"{platform.capitalize()} session expired without a refresh token. Reconnect."
+            )
+        payload = await _token_request(platform, {
+            "grant_type": "refresh_token",
+            "client_id": _creds(platform)[0],
+            "client_secret": _creds(platform)[1],
+            "refresh_token": refresh,
+        })
+        store = {
+            "access": payload.get("access_token", ""),
+            # SoundCloud refresh tokens are single-use; Spotify usually re-sends one.
+            "refresh": payload.get("refresh_token", "") or refresh,
+            "expiry": _expiry_from(payload),
+        }
+        config.update({key: store})
+        return store["access"]

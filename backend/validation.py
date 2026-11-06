@@ -4,6 +4,7 @@ Prevents:
 - Path traversal attacks (../)
 - Unsafe filenames
 - Template injection via arbitrary variables
+- Relative paths masquerading as absolute (C:relative, relative/dir)
 """
 import os
 import re
@@ -34,6 +35,31 @@ def validate_path(path: str, base_dir: str | Path) -> Path:
         raise PathTraversalError(f"Path escapes base directory: {path}")
 
     return target
+
+
+def validate_absolute_path(path: str, what: str = "path") -> str:
+    """Validate that `path` is truly absolute, not just colon-ish.
+
+    The old check let ``C:relative`` (drive-relative on Windows) and
+    ``relative/dir`` through because both contain a ``:`` or ``/``. Neither
+    is absolute, and both resolve against the current working directory,
+    which is not where the user meant their library to live.
+
+    Uses ``os.path.isabs()`` so the check is platform-correct: drive
+    letters and UNC on Windows, leading slash on POSIX.
+
+    Returns the stripped path.
+    """
+    path = path.strip()
+    if not path:
+        raise ValidationError(f"{what} must not be empty")
+    if "\x00" in path:
+        raise ValidationError(f"{what} must not contain null bytes")
+    if not os.path.isabs(path):
+        raise ValidationError(
+            f"{what} must be an absolute path, got {path!r}"
+        )
+    return path
 
 
 def validate_folder_template(template: str) -> str:
