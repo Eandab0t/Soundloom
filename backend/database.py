@@ -12,17 +12,14 @@ _db_locks: dict[int, asyncio.Lock] = {}
 
 
 def _get_db_lock() -> asyncio.Lock:
-<<<<<<< HEAD
-=======
     """Return the per-event-loop database lock.
 
     ``asyncio.Lock`` binds to the event loop that creates it. Creating the lock
     at module import time binds it to whatever loop happens to be active then
-    (often the main thread's loop), which breaks when tests run each test in its
-    own event loop. Creating it lazily on first use within an async
+    (often the main thread's loop), which breaks when tests run each test in
+    their own event loop. Creating it lazily on first use within an async
     context binds it to the loop that is actually running.
     """
->>>>>>> f16c76bba8e392cda8d0442a4771fd454df3dcf5
     global _db_locks
     loop = asyncio.get_running_loop()
     loop_id = id(loop)
@@ -40,8 +37,7 @@ _PRAGMAS = (
     "PRAGMA foreign_keys=ON",
 )
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS tracks (
+SCHEMA = """CREATE TABLE IF NOT EXISTS tracks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     file_path TEXT UNIQUE NOT NULL,
     title TEXT DEFAULT '',
@@ -218,7 +214,7 @@ async def db_transaction():
     Use this instead of calling ``execute()`` repeatedly when a set of writes
     must succeed or fail together (e.g. playlist import: one playlists row +
     many playlist_tracks rows). Statements inside the block should use the
-    yielded connection directly, not ``execute()`` — that helper takes
+    yielded connection directly, not ``execute()`` -- that helper takes
     ``_db_lock`` itself and commits per call, which would deadlock and break
     atomicity.
     """
@@ -240,7 +236,7 @@ async def execute(sql: str, params: tuple = ()) -> aiosqlite.Cursor:
             return cursor
 
 
-async def executemany(sql: str, rows: list[tuple]) -> None:
+async def executemany(sql: str, rows: list[tuple] = []) -> None:
     """Run one statement across many parameter sets, committing once.
 
     `execute` binds a single flat parameter tuple, so a batch has to go
