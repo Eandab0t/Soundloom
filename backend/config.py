@@ -1,13 +1,19 @@
-"""Configuration management for Soundloom."""
+"""Configuration management for Soundloom.
+
+This module is the single path manager: every filesystem location the app
+uses derives from the constants below, so no other module hardcodes paths.
+"""
 import json
 import logging
+import os
+import shutil
 import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Frozen (PyInstaller) builds keep the user-writable data directory next to
-# the exe, while bundled read-only assets (frontend) live in _MEIPASS.
+# Frozen (PyInstaller) builds keep the exe in the install dir, while bundled
+# read-only assets (frontend) live in _MEIPASS.
 if getattr(sys, "frozen", False):
     ROOT = Path(sys.executable).resolve().parent
     _BUNDLE = Path(getattr(sys, "_MEIPASS", ROOT))
@@ -21,14 +27,98 @@ APP_VERSION = "0.2.2"
 
 PLAYLIST_SYNC_DEFAULT_NAME = "Soundloom Sync"
 
-DATA_DIR = ROOT / "data"
+
+def _default_appdata_dir() -> Path:
+    """%LOCALAPPDATA%/Soundloom, with a sane fallback outside Windows."""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        base = str(Path.home() / "AppData" / "Local")
+    return Path(base) / "Soundloom"
+
+
+def _migrate_legacy_data(legacy: Path, target: Path) -> bool:
+    """Copy the legacy exe-adjacent data/ directory to its new home.
+
+    Copy, never move: the original directory is only ever removed by the
+    user, by hand. ``logs/`` is excluded (fresh logs belong in the new
+    location) along with __pycache__ debris. Returns True when the copy
+    completed; on any failure the partial target is removed so the caller
+    can fall back to the legacy directory without losing anything.
+    """
+    try:
+        shutil.copytree(
+            legacy,
+            target,
+            ignore=shutil.ignore_patterns("__pycache__", "logs"),
+        )
+        logger.info(
+            "Migrated user data from %s to %s (original left in place)",
+            legacy, target,
+        )
+        return True
+    except OSError as exc:
+        logger.warning("Data migration to %s failed: %s", target, exc)
+        shutil.rmtree(target, ignore_errors=True)
+        return False
+
+
+def _resolve_data_dir(root: Path, frozen: bool, env: dict) -> Path:
+    """Decide where user data lives.
+
+    Frozen builds use %LOCALAPPDATA%/Soundloom so user data survives
+    application updates and never sits inside a replaceable install dir:
+
+    1. SOUNDLOOM_DATA_DIR env var — explicit override, always wins.
+    2. ``portable.flag`` inside the exe-adjacent data/ dir — keep the old
+       portable layout (data next to the exe), no migration.
+    3. AppData/Soundloom already exists — it is the active data dir.
+    4. Legacy data/library.db exists next to the exe — one-time copy
+       migration to AppData (original preserved); if the copy fails,
+       keep using the legacy dir rather than risking data.
+    5. Fresh install — use AppData.
+
+    Development builds (not frozen) always use <repo>/data so the dev
+    workflow and the test suite stay self-contained.
+    """
+    if not frozen:
+        return root / "data"
+    override = env.get("SOUNDLOOM_DATA_DIR")
+    if override:
+        return Path(override)
+    legacy = root / "data"
+    if (legacy / "portable.flag").exists():
+        return legacy
+    target = _default_appdata_dir()
+    if target.exists():
+        return target
+    if (legacy / "library.db").exists() and not _migrate_legacy_data(legacy, target):
+        return legacy
+    return target
+
+
+DATA_DIR = _resolve_data_dir(ROOT, getattr(sys, "frozen", False), dict(os.environ))
 SETTINGS_FILE = DATA_DIR / "settings.json"
 DB_PATH = DATA_DIR / "library.db"
 COVERS_DIR = DATA_DIR / "covers"
 LOGS_DIR = DATA_DIR / "logs"
 TEMPLATES_DIR = ROOT / "templates"
-FRONTEND_DIR = _BUNDLE / "frontend"
 EXPORTS_DIR = DATA_DIR / "exports"
+
+
+def _resolve_frontend_dir(root: Path, bundle_root: Path) -> Path:
+    """Prefer a loose frontend/ in the install dir over the bundled copy.
+
+    The update system installs frontend updates as a loose directory next
+    to the exe; the bundled copy under _MEIPASS remains as the fallback.
+    In development both resolve to <repo>/frontend.
+    """
+    loose = root / "frontend"
+    if (loose / "index.html").exists():
+        return loose
+    return bundle_root / "frontend"
+
+
+FRONTEND_DIR = _resolve_frontend_dir(ROOT, _BUNDLE)
 
 DEFAULTS = {
     "theme": "dark",
