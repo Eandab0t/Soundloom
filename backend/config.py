@@ -122,8 +122,12 @@ FRONTEND_DIR = _resolve_frontend_dir(ROOT, _BUNDLE)
 
 # Component manifests describe every independently versioned piece of the
 # app (core, frontend, integrations). Bundled manifests live in _MEIPASS;
-# the update system later adds a loose, updatable copy in the install dir.
+# successful updates write override manifests into the user data dir.
 MANIFESTS_DIR = _BUNDLE / "manifests"
+USER_MANIFESTS_DIR = DATA_DIR / "manifests"
+UPDATES_DIR = DATA_DIR / "updates"
+UPDATE_STAGING_DIR = DATA_DIR / "update_staging"
+UPDATE_ROLLBACK_DIR = DATA_DIR / "backups" / "updates"
 
 DEFAULTS = {
     "theme": "dark",
@@ -178,6 +182,9 @@ DEFAULTS = {
     "source_priority": ["youtube", "deezer", "soundcloud"],
     "source_fallback": True,         # failed search jobs try the next source
     "auto_update": "notify",
+    # URL of the signed remote update manifest (updates.json). Empty means
+    # the Update Center is not configured and never contacts a server.
+    "update_manifest_url": "",
     "duplicate_policy": "keep_separate",
     "server_port": 5555,
     "server_host": "127.0.0.1",
@@ -210,6 +217,8 @@ def _ensure_dirs():
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    USER_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
+    UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings() -> dict:

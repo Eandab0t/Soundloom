@@ -39,6 +39,7 @@ from backend.api.operations import router as operations_router
 from backend.api.attention import router as attention_router
 from backend.api.matches import router as matches_router
 from backend.api.forensics import router as forensics_router
+from backend.api.updates import router as updates_router
 
 setup_logging(config.LOGS_DIR)
 logger = logging.getLogger("soundloom")
@@ -90,6 +91,15 @@ async def lifespan(app: FastAPI):
     global _shutdown_task
     config._ensure_dirs()
     await init_db()
+    # Finish or undo any update install a crash interrupted, before the
+    # UI (which may have been replaced) is served.
+    try:
+        from backend.updater import manager as update_manager
+        update_actions = update_manager.reconcile()
+        if update_actions.get("actions"):
+            logger.info("Update reconciliation: %s", update_actions["actions"])
+    except Exception as ue:
+        logger.warning("Update reconciliation failed, continuing: %s", ue)
     from backend.services.downloader import start_worker, stop_worker, set_concurrency, reclaim_orphans
     from backend.services.operations import reconcile
     from backend.services.watcher import start_watcher, stop_watcher
@@ -251,6 +261,7 @@ app.include_router(operations_router)
 app.include_router(attention_router)
 app.include_router(matches_router)
 app.include_router(forensics_router)
+app.include_router(updates_router)
 
 FRONTEND_DIR = config.FRONTEND_DIR
 
