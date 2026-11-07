@@ -79,14 +79,27 @@ def status() -> dict:
 
 
 def _rollback_versions() -> dict[str, str]:
-    """Component id -> the version a rollback would restore."""
+    """Component id -> the version a rollback would restore.
+
+    Backups win. A loose override without a backup (first update on this
+    install) reverts to the bundled copy, so report the bundled version.
+    """
     rollbacks: dict[str, str] = {}
-    if not config.UPDATE_ROLLBACK_DIR.is_dir():
-        return rollbacks
-    for component_dir in config.UPDATE_ROLLBACK_DIR.iterdir():
-        backups = sorted(component_dir.iterdir(), reverse=True)
-        if backups:
-            rollbacks[component_dir.name] = backups[0].name.split("_")[0]
+    if config.UPDATE_ROLLBACK_DIR.is_dir():
+        for component_dir in config.UPDATE_ROLLBACK_DIR.iterdir():
+            backups = sorted(component_dir.iterdir(), reverse=True)
+            if backups:
+                rollbacks[component_dir.name] = backups[0].name.split("_")[0]
+    bundled = {
+        c["id"]: c["version"] for c in discover(config.MANIFESTS_DIR)
+    }
+    if (config.ROOT / "frontend" / "index.html").exists() and "frontend" in bundled:
+        rollbacks.setdefault("frontend", bundled["frontend"])
+    modules_root = config.ROOT / "modules"
+    if modules_root.is_dir():
+        for module_dir in modules_root.iterdir():
+            if module_dir.is_dir() and module_dir.name in bundled:
+                rollbacks.setdefault(module_dir.name, bundled[module_dir.name])
     return rollbacks
 
 
@@ -380,23 +393,36 @@ def history() -> list[dict]:
 # --- restore previous version ---
 
 def restore(component_id: str) -> dict:
-    """Move the most recent rollback backup for a component back into place."""
+    """Return a component to its previous version.
+
+    With a rollback backup, that backup is moved back into place. Without
+    one (first update on this install), removing the loose override
+    reverts to the bundled copy — which is the previous version.
+    """
+    component = installed_versions().get(component_id)
+    if not component:
+        raise UpdateError(f"unknown component: {component_id}")
+    target = _target_dir(component.get("type", ""), component_id)
     backups_root = config.UPDATE_ROLLBACK_DIR / component_id
-    if not backups_root.is_dir():
-        raise UpdateError("no rollback backup exists for this component")
-    backups = sorted(backups_root.iterdir(), reverse=True)
-    if not backups:
-        raise UpdateError("no rollback backup exists for this component")
-    latest = backups[0]
-    target = _target_dir(
-        installed_versions().get(component_id, {}).get("type", ""), component_id
-    )
-    from_version = installed_versions().get(component_id, {}).get("version", "")
-    shutil.rmtree(target, ignore_errors=True)
-    shutil.move(str(latest), str(target))
-    _record_history(component_id, from_version, latest.name.split("_")[0], "restored")
-    logger.info("Restored %s to %s", component_id, latest.name)
-    return {"component_id": component_id, "restored_to": latest.name}
+    backups = sorted(backups_root.iterdir(), reverse=True) if backups_root.is_dir() else []
+    if backups:
+        latest = backups[0]
+        shutil.rmtree(target, ignore_errors=True)
+        shutil.move(str(latest), str(target))
+        restored_to = latest.name.split("_")[0]
+    elif target.exists():
+        # Loose override without a backup: reverting means removing it, so
+        # the bundled copy is served again.
+        shutil.rmtree(target)
+        bundled = {
+            c["id"]: c["version"] for c in discover(config.MANIFESTS_DIR)
+        }
+        restored_to = bundled.get(component_id, "bundled version")
+    else:
+        raise UpdateError("no rollback is available for this component")
+    _record_history(component_id, component["version"], restored_to, "restored")
+    logger.info("Restored %s to %s", component_id, restored_to)
+    return {"component_id": component_id, "restored_to": restored_to}
 
 
 # --- startup recovery ---

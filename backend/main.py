@@ -272,7 +272,13 @@ class RevalidatingStaticFiles(StaticFiles):
     Plain StaticFiles sends no Cache-Control, so browsers heuristically cache
     JS/CSS and serve stale UI after an update. `no-cache` forces a cheap
     conditional request (304 on localhost) so edits show up on reload.
+    The serving directory is re-resolved per request so a frontend update
+    installed by the Update Center goes live without restarting the app.
     """
+
+    def lookup_path(self, path: str):
+        self.directory = str(config.frontend_dir())
+        return super().lookup_path(path)
 
     def file_response(self, *args, **kwargs):
         response = super().file_response(*args, **kwargs)
@@ -285,7 +291,7 @@ app.mount("/static", RevalidatingStaticFiles(directory=str(FRONTEND_DIR)), name=
 
 @app.get("/")
 async def index():
-    return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return FileResponse(str(config.frontend_dir() / "index.html"))
 
 
 @app.websocket("/ws/events")

@@ -118,7 +118,17 @@ def _resolve_frontend_dir(root: Path, bundle_root: Path) -> Path:
     return bundle_root / "frontend"
 
 
-FRONTEND_DIR = _resolve_frontend_dir(ROOT, _BUNDLE)
+def frontend_dir() -> Path:
+    """Current frontend directory, resolved on demand.
+
+    Frontend updates install a loose copy next to the exe; resolving per
+    call lets a running server pick it up without a restart. In dev both
+    candidates are the same repo directory.
+    """
+    return _resolve_frontend_dir(ROOT, _BUNDLE)
+
+
+FRONTEND_DIR = frontend_dir()
 
 # Component manifests describe every independently versioned piece of the
 # app (core, frontend, integrations). Bundled manifests live in _MEIPASS;
