@@ -8,3 +8,4 @@ mutagen>=1.47
 yt-dlp>=2025.6
 pydantic>=2.8
 aiohttp>=3.9
+cryptography>=44.0
