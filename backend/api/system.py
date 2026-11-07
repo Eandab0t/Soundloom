@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from fastapi import APIRouter
 from .. import config
+from ..components import discover
 
 router = APIRouter(tags=["system"])
 
@@ -38,4 +39,13 @@ async def system_status():
         "library_path": config.get("library_path"),
         "download_path": config.get("download_path"),
         "db_path": str(config.DB_PATH),
+    }
+
+
+@router.get("/api/components")
+async def list_components():
+    """Installed components with their versions — the Update Center's source."""
+    return {
+        "core_version": config.APP_VERSION,
+        "components": discover(config.MANIFESTS_DIR),
     }

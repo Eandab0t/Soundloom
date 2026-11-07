@@ -120,6 +120,11 @@ def _resolve_frontend_dir(root: Path, bundle_root: Path) -> Path:
 
 FRONTEND_DIR = _resolve_frontend_dir(ROOT, _BUNDLE)
 
+# Component manifests describe every independently versioned piece of the
+# app (core, frontend, integrations). Bundled manifests live in _MEIPASS;
+# the update system later adds a loose, updatable copy in the install dir.
+MANIFESTS_DIR = _BUNDLE / "manifests"
+
 DEFAULTS = {
     "theme": "dark",
     "library_path": str(Path.home() / "Music"),

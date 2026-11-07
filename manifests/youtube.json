@@ -1,0 +1,12 @@
+{
+  "id": "youtube",
+  "name": "YouTube Adapter (yt-dlp)",
+  "version": "0.2.2",
+  "type": "integration",
+  "description": "Download and URL-resolution adapter for YouTube and SoundCloud media via yt-dlp. The yt-dlp engine itself ships with the core application.",
+  "maintainer": "Soundloom",
+  "core_compatibility": ">=0.2.2",
+  "dependencies": [],
+  "entrypoint": "backend/sources/ytdlp_source.py",
+  "restart_required": true
+}

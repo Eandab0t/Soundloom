@@ -1,0 +1,12 @@
+{
+  "id": "local",
+  "name": "Local Files Adapter",
+  "version": "0.2.2",
+  "type": "integration",
+  "description": "Adapter for acquiring tracks from local files and folders instead of remote providers.",
+  "maintainer": "Soundloom",
+  "core_compatibility": ">=0.2.2",
+  "dependencies": [],
+  "entrypoint": "backend/sources/local_source.py",
+  "restart_required": true
+}
