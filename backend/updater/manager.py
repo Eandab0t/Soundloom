@@ -74,7 +74,20 @@ def status() -> dict:
         ],
         "problems": (_last_check or {}).get("problems", []),
         "staged": sorted(_staged),
+        "rollbacks": _rollback_versions(),
     }
+
+
+def _rollback_versions() -> dict[str, str]:
+    """Component id -> the version a rollback would restore."""
+    rollbacks: dict[str, str] = {}
+    if not config.UPDATE_ROLLBACK_DIR.is_dir():
+        return rollbacks
+    for component_dir in config.UPDATE_ROLLBACK_DIR.iterdir():
+        backups = sorted(component_dir.iterdir(), reverse=True)
+        if backups:
+            rollbacks[component_dir.name] = backups[0].name.split("_")[0]
+    return rollbacks
 
 
 # --- check ---

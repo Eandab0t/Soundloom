@@ -100,6 +100,10 @@
             <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
             <span>Logs</span>
           </a>
+          <a href="#updates" class="nav-item" data-tab="updates">
+            <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+            <span>Update Center</span>
+          </a>
         </div>
       </nav>
 
@@ -111,6 +115,10 @@
         <a href="#logs" class="nav-item" data-tab="logs">
           <svg class="nav-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
           <span>Logs</span>
+        </a>
+        <a href="#updates" class="nav-item" data-tab="updates">
+          <svg class="nav-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
+          <span>Update Center</span>
         </a>
         <div class="sidebar-version">Soundloom 0.2.2 · beta</div>
       </div>
@@ -652,6 +660,43 @@
             </div>
           </div>
           <div class="log-container" id="log-output"><pre class="log-pre">No logs yet.</pre></div>
+        </section>
+
+        <!-- ======== UPDATE CENTER ======== -->
+        <section id="tab-updates" class="tab-panel">
+          <div class="panel-head">
+            <div><h1>Update Center</h1></div>
+            <div class="input-row">
+              <button class="btn primary sm" id="updates-check-btn" onclick="Updates.check()">Check for updates</button>
+              <button class="btn ghost sm" onclick="Updates.refresh()">Refresh</button>
+            </div>
+          </div>
+
+          <div class="card" id="updates-overview" style="margin-bottom:12px;"></div>
+
+          <div class="card" style="margin-bottom:12px;">
+            <div class="input-row" style="justify-content:space-between; align-items:center;">
+              <strong>Components</strong>
+              <div class="input-row">
+                <button class="btn ghost sm" onclick="Updates.selectAll()">Select all compatible</button>
+                <button class="btn ghost sm" onclick="Updates.clearSelection()">Clear</button>
+                <button class="btn ghost sm" id="updates-cancel-btn" style="display:none;" onclick="Updates.cancelDownload()">Cancel download</button>
+                <button class="btn primary sm" id="updates-download-btn" onclick="Updates.downloadSelected()">Download selected</button>
+                <button class="btn primary sm" id="updates-review-btn" onclick="Updates.showReview()">Review & install…</button>
+              </div>
+            </div>
+            <div id="updates-components"></div>
+          </div>
+
+          <div class="card" id="updates-review" style="display:none; margin-bottom:12px;"></div>
+
+          <div class="card">
+            <div class="input-row" style="justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <strong>Update history</strong>
+              <button class="btn ghost sm" onclick="Updates.loadHistory()">Refresh history</button>
+            </div>
+            <div id="updates-history"></div>
+          </div>
         </section>
 
       </main>

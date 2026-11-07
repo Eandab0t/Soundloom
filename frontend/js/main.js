@@ -15,6 +15,7 @@ import { Convert } from './tabs/convert.js';
 import { Settings } from './tabs/settings.js';
 import { Logs } from './tabs/logs.js';
 import { Fix } from './tabs/fix.js';
+import { Updates } from './tabs/updates.js';
 import { Player } from './player.js';
 import { Shortcuts } from './shortcuts.js';
 
@@ -80,6 +81,7 @@ const App = {
         if (tab === 'identify') { Identify.loadMethods(); Identify.load(); }
         if (tab === 'convert') Convert.init();
         if (tab === 'logs') Logs.refresh();
+        if (tab === 'updates') Updates.load();
       });
     });
   },
@@ -281,6 +283,6 @@ export const Onboarding = {
 // Wire onboarding buttons once the DOM is ready.
 document.addEventListener('DOMContentLoaded', () => Onboarding.wire());
 // (AddSource and Logs were missing before — their buttons silently threw.)
-Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Attention, Shortcuts });
+Object.assign(window, { App, Library, Queue, Sync, Playlists, Watch, AddSource, Identify, Metadata, Convert, Settings, Logs, Fix, Player, Attention, Shortcuts, Updates });
 
 document.addEventListener('DOMContentLoaded', () => App.init());
