@@ -176,7 +176,7 @@ class TestModuleUpdateEndToEnd:
         await manager.install(["testadapter"])
         assert (paths / "modules" / "testadapter").exists()
 
-        manager.restore("testadapter")
+        result = await manager.restore("testadapter")
         # No backup existed (first update): the loose override is removed.
         assert not (paths / "modules" / "testadapter").exists()
         assert manager.history()[-1]["result"] == "restored"

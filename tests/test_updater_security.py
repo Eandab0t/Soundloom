@@ -125,3 +125,38 @@ class TestSafeExtract:
         with pytest.raises(SecurityError):
             security.safe_extract(archive, dest)
         assert not (dest / "ok.txt").exists()
+
+    def test_symlink_entry_becomes_regular_file(self, tmp_path):
+        """A symlink entry in the archive must never create a link."""
+        archive_path = tmp_path / "pkg.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            info = zipfile.ZipInfo("link.py")
+            info.external_attr = (0o120777 << 16)  # symlink mode bits
+            archive.writestr(info, "../../elsewhere/secret.py")
+        dest = tmp_path / "install"
+        written = security.safe_extract(archive_path, dest)
+        target = dest / "link.py"
+        assert target in written
+        assert target.is_file() and not target.is_symlink()
+        assert target.read_text() == "../../elsewhere/secret.py"
+
+    def test_entry_size_cap(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(security, "MAX_EXTRACT_ENTRY_BYTES", 1024)
+        archive = self._zip_with(tmp_path, {"big.bin": b"\0" * 4096})
+        with pytest.raises(SecurityError, match="too large"):
+            security.safe_extract(archive, tmp_path / "install")
+
+    def test_total_size_cap(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(security, "MAX_EXTRACT_TOTAL_BYTES", 2048)
+        archive = self._zip_with(tmp_path, {
+            "a.bin": b"\0" * 1500, "b.bin": b"\0" * 1500,
+        })
+        with pytest.raises(SecurityError, match="size limit"):
+            security.safe_extract(archive, tmp_path / "install")
+
+    def test_file_count_cap(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(security, "MAX_EXTRACT_FILES", 3)
+        archive = self._zip_with(tmp_path, {f"f{i}.txt": "x" for i in range(5)})
+        with pytest.raises(SecurityError, match="too many"):
+            security.safe_extract(archive, tmp_path / "install")
+        assert not (tmp_path / "install" / "f0.txt").exists()

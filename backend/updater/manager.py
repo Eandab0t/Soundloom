@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=300)
 FETCH_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
+# Resource-exhaustion limits. A hostile update source must not be able to
+# exhaust memory (manifest) or disk (packages).
+MAX_MANIFEST_BYTES = 5 * 1024 * 1024          # 5 MB
+MAX_PACKAGE_BYTES = 512 * 1024 * 1024         # 512 MB
+
 
 class UpdateError(Exception):
     """Refused or failed update operation; message is user-facing."""
@@ -151,7 +156,10 @@ async def _fetch_manifest(url: str) -> dict:
     async with aiohttp.ClientSession(timeout=FETCH_TIMEOUT) as session:
         async with session.get(url) as response:
             response.raise_for_status()
-            data = await response.read()
+            _require_secure_url(str(response.url))
+            data = await response.content.read(MAX_MANIFEST_BYTES + 1)
+    if len(data) > MAX_MANIFEST_BYTES:
+        raise UpdateError("update manifest exceeds the size limit")
     try:
         fetched = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -159,6 +167,19 @@ async def _fetch_manifest(url: str) -> dict:
     if not isinstance(fetched, dict):
         raise UpdateError("Update manifest must be a JSON object.")
     return fetched
+
+
+def _require_secure_url(final_url: str) -> None:
+    """A redirect must never downgrade the transport.
+
+    aiohttp follows redirects by default, so the URL that actually served
+    the bytes may differ from the one we asked for. Only https — or plain
+    http on the loopback (tests, local mirrors) — is acceptable.
+    """
+    if manifest_mod.is_loopback_url(final_url):
+        return
+    if not final_url.startswith("https://"):
+        raise UpdateError("update source redirected to a non-https URL")
 
 
 # --- download (staging) ---
@@ -183,8 +204,14 @@ async def _download_components(component_ids: list[str]) -> dict:
     if not _last_check:
         raise UpdateError("Check for updates before downloading.")
     available = {u["id"]: u for u in _last_check["available"]}
+    # Selecting one update pulls in the components it depends on; an
+    # unknown or circular dependency refuses the whole download rather
+    # than installing something broken.
+    resolved, problems = manifest_mod.resolve_dependencies(component_ids, list(available.values()))
+    if problems:
+        raise UpdateError("cannot download: " + "; ".join(problems))
     results: dict[str, str] = {}
-    for component_id in component_ids:
+    for component_id in resolved:
         component = available.get(component_id)
         if component is None:
             results[component_id] = "refused: not an available update"
@@ -212,9 +239,20 @@ async def _download_package(component: dict) -> Path:
         async with aiohttp.ClientSession(timeout=DOWNLOAD_TIMEOUT) as session:
             async with session.get(component["package_url"]) as response:
                 response.raise_for_status()
+                _require_secure_url(str(response.url))
+                declared = response.headers.get("Content-Length")
+                if declared and declared.isdigit() and int(declared) > MAX_PACKAGE_BYTES:
+                    raise UpdateError("package exceeds the size limit")
+                received = 0
                 with open(partial, "wb") as handle:
                     async for chunk in response.content.iter_chunked(1024 * 1024):
+                        received += len(chunk)
+                        if received > MAX_PACKAGE_BYTES:
+                            raise UpdateError("package exceeds the size limit")
                         handle.write(chunk)
+    except UpdateError:
+        partial.unlink(missing_ok=True)
+        raise
     except Exception as exc:
         partial.unlink(missing_ok=True)
         raise UpdateError(f"download failed: {exc}") from exc
@@ -412,37 +450,40 @@ def history() -> list[dict]:
 
 # --- restore previous version ---
 
-def restore(component_id: str) -> dict:
+async def restore(component_id: str) -> dict:
     """Return a component to its previous version.
 
-    With a rollback backup, that backup is moved back into place. Without
-    one (first update on this install), removing the loose override
-    reverts to the bundled copy — which is the previous version.
+    Serialized with install under the same lock: a restore must never
+    interleave with an in-flight install. With a rollback backup, that
+    backup is moved back into place. Without one (first update on this
+    install), removing the loose override reverts to the bundled copy —
+    which is the previous version.
     """
-    component = installed_versions().get(component_id)
-    if not component:
-        raise UpdateError(f"unknown component: {component_id}")
-    target = _target_dir(component.get("type", ""), component_id)
-    backups_root = config.UPDATE_ROLLBACK_DIR / component_id
-    backups = sorted(backups_root.iterdir(), reverse=True) if backups_root.is_dir() else []
-    if backups:
-        latest = backups[0]
-        shutil.rmtree(target, ignore_errors=True)
-        shutil.move(str(latest), str(target))
-        restored_to = latest.name.split("_")[0]
-    elif target.exists():
-        # Loose override without a backup: reverting means removing it, so
-        # the bundled copy is served again.
-        shutil.rmtree(target)
-        bundled = {
-            c["id"]: c["version"] for c in discover(config.MANIFESTS_DIR)
-        }
-        restored_to = bundled.get(component_id, "bundled version")
-    else:
-        raise UpdateError("no rollback is available for this component")
-    _record_history(component_id, component["version"], restored_to, "restored")
-    logger.info("Restored %s to %s", component_id, restored_to)
-    return {"component_id": component_id, "restored_to": restored_to}
+    async with _lock:
+        component = installed_versions().get(component_id)
+        if not component:
+            raise UpdateError(f"unknown component: {component_id}")
+        target = _target_dir(component.get("type", ""), component_id)
+        backups_root = config.UPDATE_ROLLBACK_DIR / component_id
+        backups = sorted(backups_root.iterdir(), reverse=True) if backups_root.is_dir() else []
+        if backups:
+            latest = backups[0]
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.move(str(latest), str(target))
+            restored_to = latest.name.split("_")[0]
+        elif target.exists():
+            # Loose override without a backup: reverting means removing it,
+            # so the bundled copy is served again.
+            shutil.rmtree(target)
+            bundled = {
+                c["id"]: c["version"] for c in discover(config.MANIFESTS_DIR)
+            }
+            restored_to = bundled.get(component_id, "bundled version")
+        else:
+            raise UpdateError("no rollback is available for this component")
+        _record_history(component_id, component["version"], restored_to, "restored")
+        logger.info("Restored %s to %s", component_id, restored_to)
+        return {"component_id": component_id, "restored_to": restored_to}
 
 
 # --- startup recovery ---

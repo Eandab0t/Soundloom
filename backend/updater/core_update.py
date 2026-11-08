@@ -42,6 +42,14 @@ def _core_dir() -> Path:
 
 
 def pending_receipt() -> dict | None:
+    """The staged-but-not-yet-applied core update receipt, if any.
+
+    An ``applied.json`` marker means the helper already consumed this
+    receipt; reporting it as pending would re-run the apply on the next
+    shutdown and overwrite the rollback backup.
+    """
+    if (_core_dir() / "applied.json").exists():
+        return None
     try:
         receipt = json.loads((_core_dir() / "pending.json").read_text(encoding="utf-8"))
         return receipt if receipt.get("staged_dir") else None
@@ -169,6 +177,15 @@ def _restore_backup(applied: Path) -> bool:
     exe = target / "Soundloom.exe"
     internal = target / "_internal"
     ok = True
+    if not backup_dir or not backup_dir.is_dir():
+        # The helper completed the swap but the backup is gone; there is
+        # nothing to roll back to, so the applied core is accepted.
+        logger.warning(
+            "Core update was applied but no backup exists; keeping the "
+            "applied version %s", receipt.get("version"),
+        )
+        applied.unlink(missing_ok=True)
+        return ok
     if backup_dir.is_dir():
         # Undo the helper's swap: current files go back to staging trash,
         # backup returns to the install dir.

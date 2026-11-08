@@ -2,6 +2,7 @@
 import pytest
 
 from backend.updater import manifest
+from tools import make_release
 
 
 def _component(component_id="youtube", version="0.2.3", **overrides):
@@ -112,6 +113,24 @@ class TestAvailableUpdates:
         )
         assert [u["id"] for u in updates] == ["youtube"]
         assert len(problems) == 1 and "deezer" in problems[0]
+
+
+class TestManifestBaseUrl:
+    def test_base_url_prefixes_package_urls(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        private_key = Ed25519PrivateKey.generate()
+        package = make_release.build_package("youtube", "0.2.3", "integration", {"a.py": "x"})
+        manifest = make_release.build_manifest(
+            [("youtube-0.2.3.zip", package)],
+            app_version="0.3.0",
+            core_compatibility=">=0.2.2",
+            key=private_key,
+            base_url="https://example.com/updates/0.3.0/",
+        )
+        entry = manifest["components"][0]
+        assert entry["package_url"] == (
+            "https://example.com/updates/0.3.0/packages/youtube-0.2.3.zip"
+        )
 
 
 class TestResolveDependencies:

@@ -162,7 +162,7 @@ class TestFrontendUpdateEndToEnd:
             "<html>new ui</html>"
         )
 
-        manager.restore("frontend")
+        result = await manager.restore("frontend")
         # The loose override is gone; resolution falls back to the bundle.
         assert config.frontend_dir() == config._BUNDLE / "frontend"
         assert manager.history()[-1]["result"] == "restored"

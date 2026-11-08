@@ -89,8 +89,14 @@ def build_module_package(component_id: str, version: str,
 
 def build_manifest(packages: list[tuple[str, bytes]], app_version: str,
                    core_compatibility: str, key: Ed25519PrivateKey,
-                   release_notes: str = "",
+                   release_notes: str = "", base_url: str = "",
                    restart_by_type: dict[str, bool] | None = None) -> dict:
+    """Assemble and sign the remote update manifest.
+
+    ``base_url`` prefixes each package_url; the manager fetches package
+    URLs as absolute URLs, so releases must pass e.g.
+    ``https://example.com/updates/0.3.0/``.
+    """
     restart_by_type = restart_by_type or {
         "core": True, "frontend": False, "integration": True,
     }
@@ -105,7 +111,7 @@ def build_manifest(packages: list[tuple[str, bytes]], app_version: str,
             "dependencies": package.get("dependencies", []),
             "restart_required": restart_by_type.get(package["type"], True),
             "release_notes": "",
-            "package_url": f"packages/{name}",
+            "package_url": f"{base_url}packages/{name}",
             "sha256": hashlib.sha256(package_bytes).hexdigest(),
         })
     body = {
@@ -151,6 +157,11 @@ def main() -> int:
     p_manifest.add_argument("--out", required=True)
     p_manifest.add_argument("--core-compatibility", default=">=0.2.2")
     p_manifest.add_argument("--release-notes", default="")
+    p_manifest.add_argument(
+        "--base-url", required=True,
+        help="https URL the packages will be served from (their URLs in the "
+             "manifest must be absolute)",
+    )
 
     args = parser.parse_args()
     out_dir = Path(args.out)
@@ -183,7 +194,7 @@ def main() -> int:
         return 1
     manifest = build_manifest(
         packages, args.app_version, args.core_compatibility, key,
-        release_notes=args.release_notes,
+        release_notes=args.release_notes, base_url=args.base_url,
     )
     manifest_path = out_dir / "updates.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

@@ -80,21 +80,44 @@ def _safe_target(dest_dir: Path, archive_name: str) -> Path:
     return target
 
 
+# Extraction caps: a hostile package must not expand without bound.
+MAX_EXTRACT_TOTAL_BYTES = 2 * 1024 * 1024 * 1024   # 2 GB unpacked
+MAX_EXTRACT_ENTRY_BYTES = 256 * 1024 * 1024        # 256 MB per file
+MAX_EXTRACT_FILES = 20_000
+_COPY_CHUNK = 1024 * 1024
+
+
 def safe_extract(zip_path: Path, dest_dir: Path) -> list[Path]:
     """Extract a zip into dest_dir, refusing path traversal and overruns.
 
     Every entry is resolved and checked to stay inside dest_dir before
-    anything is written. Absolute paths, '..' segments and drive-absolute
-    names are all rejected by the containment check.
+    anything is written; entries are streamed (never loaded whole into
+    memory) under per-entry, total and file-count caps. Symlink and other
+    special entries are written as regular files — no link is ever
+    created, so a symlink in the archive cannot point outside dest_dir.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    total = 0
     with zipfile.ZipFile(zip_path) as archive:
-        for info in archive.infolist():
-            if info.is_dir():
-                continue
+        names = [info for info in archive.infolist() if not info.is_dir()]
+        if len(names) > MAX_EXTRACT_FILES:
+            raise SecurityError("package contains too many files")
+        for info in names:
             target = _safe_target(dest_dir, info.filename)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(archive.read(info))
+            entry_bytes = 0
+            with archive.open(info) as source, open(target, "wb") as sink:
+                while True:
+                    chunk = source.read(_COPY_CHUNK)
+                    if not chunk:
+                        break
+                    entry_bytes += len(chunk)
+                    total += len(chunk)
+                    if entry_bytes > MAX_EXTRACT_ENTRY_BYTES:
+                        raise SecurityError(f"archive entry too large: {info.filename!r}")
+                    if total > MAX_EXTRACT_TOTAL_BYTES:
+                        raise SecurityError("package expands beyond the size limit")
+                    sink.write(chunk)
             written.append(target)
     return written

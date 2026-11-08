@@ -78,6 +78,19 @@ class TestStageAndPrepare:
         (core_dir / "pending.json").write_text("{broken", encoding="utf-8")
         assert core_update.pending_receipt() is None
 
+    def test_pending_receipt_treats_applied_as_consumed(self, core_paths):
+        """Once the helper applied the update, the receipt must read as
+        consumed — otherwise shutdown re-spawns the helper and overwrites
+        the rollback backup."""
+        core_dir = config.UPDATE_STAGING_DIR / "core"
+        core_dir.mkdir(parents=True)
+        (core_dir / "pending.json").write_text(json.dumps({
+            "staged_dir": str(core_dir / "new"), "version": "0.3.0",
+        }), encoding="utf-8")
+        assert core_update.pending_receipt() is not None
+        (core_dir / "applied.json").write_text("{}", encoding="utf-8")
+        assert core_update.pending_receipt() is None
+
 
 class TestStartupRecovery:
     def test_commit_when_verified(self, core_paths):
@@ -192,6 +205,112 @@ class TestHelperApply:
         assert result["applied"] is False
         assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ fake old exe"
         assert (core_paths / "_internal" / "code.pyd").read_bytes() == b"old dll"
+        assert (core_dir / "failed.json").exists()
+
+
+class TestHelperStateMachine:
+    """The helper must be idempotent and must never overwrite the backup."""
+
+    def _state(self, core_paths):
+        core_dir = config.UPDATE_STAGING_DIR / "core"
+        return core_dir, core_dir / "new", core_dir / "backup", core_dir / "pending.json"
+
+    def test_replay_after_apply_is_idempotent(self, core_paths):
+        core_dir, staged, backup, pending = self._state(core_paths)
+        _fake_install_tree(core_paths, exe_bytes=b"MZ new exe")
+        backup.mkdir(parents=True)
+        (backup / "Soundloom.exe").write_bytes(b"MZ fake old exe")
+        (core_dir / "applied.json").write_text("{}", encoding="utf-8")
+        pending.write_text("{}", encoding="utf-8")
+
+        result = updater_helper.apply_staged_core(
+            {"staged_dir": str(staged), "version": "0.3.0"}, core_paths,
+            pending_path=pending,
+        )
+        assert result["applied"] is True and result.get("already_applied")
+        # Nothing was touched and the receipt was consumed.
+        assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ new exe"
+        assert (backup / "Soundloom.exe").read_bytes() == b"MZ fake old exe"
+        assert not pending.exists()
+
+    def test_successful_apply_consumes_pending_receipt(self, core_paths):
+        core_dir, staged, backup, pending = self._state(core_paths)
+        _fake_install_tree(core_paths)
+        staged.mkdir(parents=True)
+        (staged / "Soundloom.exe").write_bytes(b"MZ new exe")
+        pending.write_text("{}", encoding="utf-8")
+
+        result = updater_helper.apply_staged_core(
+            {"staged_dir": str(staged), "version": "0.3.0"}, core_paths,
+            pending_path=pending,
+        )
+        assert result["applied"] is True
+        assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ new exe"
+        assert (backup / "Soundloom.exe").read_bytes() == b"MZ fake old exe"
+        assert not pending.exists()
+
+    def test_reapply_after_interrupted_apply_preserves_backup(self, core_paths):
+        """Crash mid-swap, then retry: the genuine old backup must survive
+        and the swap must start from the restored backup state."""
+        core_dir, staged, backup, pending = self._state(core_paths)
+        _fake_install_tree(core_paths, exe_bytes=b"MZ old exe")
+        backup.mkdir(parents=True)
+        (backup / "Soundloom.exe").write_bytes(b"MZ old exe")
+        (backup / "_internal").mkdir()
+        (backup / "_internal" / "code.pyd").write_bytes(b"old dll")
+        # Interrupted state: install dir has the new exe but old _internal.
+        (core_paths / "Soundloom.exe").write_bytes(b"MZ new exe")
+        staged.mkdir(parents=True)
+        (staged / "Soundloom.exe").write_bytes(b"MZ new exe")
+        (staged / "_internal").mkdir()
+        (staged / "_internal" / "code.pyd").write_bytes(b"new dll")
+
+        result = updater_helper.apply_staged_core(
+            {"staged_dir": str(staged), "version": "0.3.0"}, core_paths,
+            pending_path=pending,
+        )
+        assert result["applied"] is True
+        # Swap completed against the restored state.
+        assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ new exe"
+        assert (core_paths / "_internal" / "code.pyd").read_bytes() == b"new dll"
+        # The backup still holds the genuine old files.
+        assert (backup / "Soundloom.exe").read_bytes() == b"MZ old exe"
+        assert (backup / "_internal" / "code.pyd").read_bytes() == b"old dll"
+
+    def test_marker_write_interrupted_is_reconstructed(self, core_paths):
+        """Swap finished, marker write crashed, staged emptied:
+        reconstruct the marker instead of failing."""
+        core_dir, staged, backup, pending = self._state(core_paths)
+        _fake_install_tree(core_paths, exe_bytes=b"MZ new exe")
+        (core_paths / "_internal" / "code.pyd").write_bytes(b"new dll")
+        backup.mkdir(parents=True)
+        (backup / "Soundloom.exe").write_bytes(b"MZ old exe")
+        staged.mkdir(parents=True)  # emptied by the completed swap
+        pending.write_text("{}", encoding="utf-8")
+
+        result = updater_helper.apply_staged_core(
+            {"staged_dir": str(staged), "version": "0.3.0"}, core_paths,
+            pending_path=pending,
+        )
+        assert result["applied"] is True and result.get("reconstructed")
+        assert (core_dir / "applied.json").exists()
+        assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ new exe"
+        assert not pending.exists()
+
+    def test_missing_staged_and_no_backup_fails_clean(self, core_paths):
+        core_dir, staged, backup, pending = self._state(core_paths)
+        _fake_install_tree(core_paths)
+        staged.mkdir(parents=True)
+        pending.write_text("{}", encoding="utf-8")
+
+        result = updater_helper.apply_staged_core(
+            {"staged_dir": str(staged), "version": "0.3.0"}, core_paths,
+            pending_path=pending,
+        )
+        assert result["applied"] is False
+        # Install dir untouched; pending kept for inspection.
+        assert (core_paths / "Soundloom.exe").read_bytes() == b"MZ fake old exe"
+        assert pending.exists()
         assert (core_dir / "failed.json").exists()
 
 

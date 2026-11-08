@@ -204,14 +204,49 @@ class TestDownload:
         with pytest.raises(manager.UpdateError, match="Check for updates"):
             await manager.download(["youtube"])
 
+    async def test_oversized_package_refused(self, paths, server, monkeypatch, keypair):
+        monkeypatch.setattr(config, "get", lambda k, d=None: {
+            "update_manifest_url": server["base"] + "updates.json",
+        }.get(k, d))
+        monkeypatch.setattr(manager, "MAX_PACKAGE_BYTES", 100)
+        _publish(server, "youtube", "0.2.3", "integration", {"code.py": "x" * 5000})
+        await manager.check()
+        result = await manager.download(["youtube"])
+        assert "size limit" in result["results"]["youtube"]
+        assert manager.status()["staged"] == []
+        # No partial file left in staging.
+        assert not (config.UPDATE_STAGING_DIR / "youtube-0.2.3.zip").exists()
+        assert not (config.UPDATE_STAGING_DIR / "youtube-0.2.3.zip.part").exists()
+
+    async def test_redirect_downgrade_to_http_refused(self, paths, server, monkeypatch):
+        """A https→http redirect (or any final non-https non-loopback URL)
+        must be refused; tested at the URL gate itself."""
+        with pytest.raises(manager.UpdateError, match="non-https"):
+            manager._require_secure_url("http://cdn.example.com/packages/x.zip")
+        # Loopback http stays allowed (tests, local mirrors).
+        assert manager._require_secure_url("http://127.0.0.1:8000/x") is None
+        assert manager._require_secure_url("https://github.com/x") is None
+
+    async def test_manifest_size_cap(self, paths, server, monkeypatch, keypair):
+        monkeypatch.setattr(config, "get", lambda k, d=None: {
+            "update_manifest_url": server["base"] + "updates.json",
+        }.get(k, d))
+        monkeypatch.setattr(manager, "MAX_MANIFEST_BYTES", 64)
+        # Size is checked before signature verification, so an unsigned
+        # oversized body is refused on size alone.
+        server["manifest"] = {"pad": "a" * 4096}
+        with pytest.raises(manager.UpdateError, match="size limit"):
+            await manager.check()
+
     async def test_unknown_component_refused(self, server, monkeypatch, keypair):
         monkeypatch.setattr(config, "get", lambda k, d=None: {
             "update_manifest_url": server["base"] + "updates.json",
         }.get(k, d))
         _publish(server, "youtube", "0.2.3", "integration", {"code.py": "x"})
         await manager.check()
-        result = await manager.download(["ghost"])
-        assert "refused" in result["results"]["ghost"]
+        # Unknown ids refuse the whole download — never a partial selection.
+        with pytest.raises(manager.UpdateError, match="ghost"):
+            await manager.download(["ghost"])
         assert manager.status()["staged"] == []
 
     async def test_happy_path_stages(self, server, monkeypatch, keypair):
@@ -362,14 +397,40 @@ class TestRestore:
         await manager.download(["frontend"])
         await manager.install(["frontend"])
 
-        result = manager.restore("frontend")
+        result = await manager.restore("frontend")
         assert result["component_id"] == "frontend"
         assert old_index.read_text(encoding="utf-8") == "<html>old ui</html>"
         assert manager.history()[-1]["result"] == "restored"
 
     async def test_restore_without_backup_refused(self, paths):
         with pytest.raises(manager.UpdateError, match="no rollback"):
-            manager.restore("frontend")
+            await manager.restore("frontend")
+
+
+class TestDependencyResolutionWired:
+    async def test_download_expands_dependencies(self, paths, server, monkeypatch, keypair):
+        monkeypatch.setattr(config, "get", lambda k, d=None: {
+            "update_manifest_url": server["base"] + "updates.json",
+        }.get(k, d))
+        _publish(server, "metadata", "0.2.3", "integration", {"p.py": "x"})
+        _publish(server, "youtube", "0.2.3", "integration",
+                 {"code.py": "x"}, dependencies=["metadata"])
+        await manager.check()
+        result = await manager.download(["youtube"])
+        assert result["results"]["youtube"] == "staged"
+        assert result["results"]["metadata"] == "staged"
+        assert sorted(manager.status()["staged"]) == ["metadata", "youtube"]
+
+    async def test_unknown_dependency_refuses_download(self, paths, server, monkeypatch, keypair):
+        monkeypatch.setattr(config, "get", lambda k, d=None: {
+            "update_manifest_url": server["base"] + "updates.json",
+        }.get(k, d))
+        _publish(server, "youtube", "0.2.3", "integration",
+                 {"code.py": "x"}, dependencies=["ghost"])
+        await manager.check()
+        with pytest.raises(manager.UpdateError, match="ghost"):
+            await manager.download(["youtube"])
+        assert manager.status()["staged"] == []
 
 
 class TestReconcile:
