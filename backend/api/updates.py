@@ -67,6 +67,6 @@ async def updates_history():
 @router.post("/api/updates/restore")
 async def updates_restore(body: ComponentId):
     try:
-        return manager.restore(body.component_id)
+        return await manager.restore(body.component_id)
     except UpdateError as exc:
         return {"error": str(exc)}
