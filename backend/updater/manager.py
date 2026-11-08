@@ -75,7 +75,13 @@ def status() -> dict:
         "problems": (_last_check or {}).get("problems", []),
         "staged": sorted(_staged),
         "rollbacks": _rollback_versions(),
+        "pending_core_restart": _pending_core_restart(),
     }
+
+
+def _pending_core_restart() -> bool:
+    from . import core_update
+    return core_update.pending_receipt() is not None
 
 
 def _rollback_versions() -> dict[str, str]:
@@ -283,6 +289,8 @@ def _install_one(component_id: str) -> str:
     if package.get("id") != component_id or package.get("version") != staged["version"]:
         raise UpdateError("package contents do not match the selected update")
     package_type = package.get("type", "")
+    if package_type == "core":
+        return _install_core(component_id, package_path, staged["version"])
     installed = installed_versions().get(component_id, {})
     old_version = installed.get("version", "")
     target = _target_dir(package_type or installed.get("type", ""), component_id)
@@ -328,6 +336,18 @@ def _health_check(component_type: str, target: Path) -> bool:
     except (OSError, json.JSONDecodeError):
         return False
     return not validate_manifest(package)
+
+
+def _install_core(component_id: str, package_path: Path, version: str) -> str:
+    """Core updates are staged for the external updater, applied on restart."""
+    from . import core_update
+
+    staged_dir = core_update.stage_core_package(package_path)
+    package_path.unlink(missing_ok=True)
+    core_update.prepare_apply(staged_dir, version)
+    _record_history("core", config.APP_VERSION, version, "staged_for_restart")
+    _staged.pop(component_id, None)
+    return "staged — restart Soundloom to apply"
 
 
 def _backup_target(target: Path, component_id: str, old_version: str) -> Path:

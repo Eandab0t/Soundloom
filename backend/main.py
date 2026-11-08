@@ -100,6 +100,15 @@ async def lifespan(app: FastAPI):
             logger.info("Update reconciliation: %s", update_actions["actions"])
     except Exception as ue:
         logger.warning("Update reconciliation failed, continuing: %s", ue)
+    # Commit or roll back a core update applied by the external helper on
+    # the previous shutdown. Must happen before anything else starts.
+    try:
+        from backend.updater import core_update
+        core_actions = core_update.recover_on_startup()
+        if core_actions:
+            logger.info("Core update recovery: %s", core_actions)
+    except Exception as ce:
+        logger.warning("Core update recovery failed, continuing: %s", ce)
     from backend.services.downloader import start_worker, stop_worker, set_concurrency, reclaim_orphans
     from backend.services.operations import reconcile
     from backend.services.watcher import start_watcher, stop_watcher
@@ -194,6 +203,13 @@ async def lifespan(app: FastAPI):
     await start_watcher()
     if config.get("sync_enabled", True):
         await start_sync_loop()
+    # Everything above started cleanly: if a core update was applied by the
+    # helper, this successful startup is what verifies it.
+    try:
+        from backend.updater import core_update
+        core_update.mark_verified()
+    except Exception as ve:
+        logger.warning("Could not record core verification: %s", ve)
     _shutdown_task = asyncio.create_task(_auto_shutdown_watchdog())
     logger.info("Soundloom started on port %s", config.get("server_port", 5555))
     yield
@@ -226,6 +242,13 @@ async def lifespan(app: FastAPI):
         logger.warning("Could not stop content index cleanly: %s", ce)
 
     await close_db()
+    # A staged core update is applied by the external helper after this
+    # process exits; spawn it last so it cannot race the server.
+    try:
+        from backend.updater import core_update
+        core_update.spawn_helper()
+    except Exception as he:
+        logger.warning("Could not stage the core updater helper: %s", he)
     logger.info("Soundloom shut down")
 
 

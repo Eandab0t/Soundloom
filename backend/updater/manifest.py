@@ -7,6 +7,8 @@ must come with it".
 """
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from . import versions
 
 MANIFEST_VERSION = 1
@@ -14,6 +16,20 @@ _COMPONENT_FIELDS = (
     "id", "version", "core_compatibility", "dependencies",
     "restart_required", "release_notes", "package_url", "sha256",
 )
+
+
+def is_loopback_url(url: str) -> bool:
+    """True for 127.0.0.1/localhost/::1 — the only non-https hosts allowed.
+
+    Loopback is exempt because there is no network between the app and a
+    local mock/test server to intercept.
+    """
+    host = urlparse(url).hostname or ""
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def _valid_package_url(url: str) -> bool:
+    return url.startswith("https://") or is_loopback_url(url)
 
 
 def _validate_component(component: dict, index: int) -> list[str]:
@@ -35,7 +51,7 @@ def _validate_component(component: dict, index: int) -> list[str]:
     if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
         errors.append(f"{label}: sha256 must be 64 hex chars")
     url = component.get("package_url", "")
-    if not url.startswith("https://"):
+    if not _valid_package_url(url):
         errors.append(f"{label}: package_url must be https")
     dependencies = component.get("dependencies", [])
     if not isinstance(dependencies, list) or not all(

@@ -199,6 +199,7 @@ export const Updates = {
       const lastCheck = s.last_check ? new Date(s.last_check * 1000).toLocaleString() : 'never';
       const updatesCount = s.components.filter(c => c.update_available).length;
       overview.innerHTML = `
+        ${s.pending_core_restart ? '<div style="color:var(--warning, #e6a23c); font-size:13px; margin-bottom:6px;"><strong>Core update staged — restart Soundloom to apply it.</strong> The update is verified and will roll back automatically if it fails to start.</div>' : ''}
         <div class="input-row" style="gap:24px; flex-wrap:wrap; font-size:13px;">
           <span>Version: <strong>${esc(s.core_version)}</strong></span>
           <span>Last check: <strong>${esc(lastCheck)}</strong></span>

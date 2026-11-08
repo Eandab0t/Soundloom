@@ -28,7 +28,7 @@ def keypair(monkeypatch):
     return private_key
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def paths(tmp_path, monkeypatch):
     """Redirect every update path and the install root into a scratch dir."""
     install_root = tmp_path / "install"
@@ -315,15 +315,19 @@ class TestInstallFrontend:
         result = await manager.install(["frontend"])
         assert "hash" in result["results"]["frontend"]
 
-    async def test_core_type_refused(self, paths, server, monkeypatch, keypair):
+    async def test_core_type_stages_for_restart(self, paths, server, monkeypatch, keypair):
+        """Core never dir-swaps; a proper core package stages for the
+        external updater and applies on restart (full flow covered in
+        test_core_update.py)."""
         monkeypatch.setattr(config, "get", lambda k, d=None: {
             "update_manifest_url": server["base"] + "updates.json",
         }.get(k, d))
-        _publish(server, "core", "0.3.0", "core", {"main.py": "x"})
+        monkeypatch.setattr(config, "UPDATE_STAGING_DIR", paths.parent / "staging")
+        _publish(server, "core", "0.3.0", "core", {"Soundloom.exe": "MZ fake exe"})
         await manager.check()
         await manager.download(["core"])
         result = await manager.install(["core"])
-        assert "cannot be updated here" in result["results"]["core"]
+        assert "staged" in result["results"]["core"]
 
 
 class TestInstallIntegration:
@@ -408,7 +412,8 @@ class TestApi:
         body = await updates_install(ComponentSelection(component_ids=["youtube"]))
         assert "not staged" in body["results"]["youtube"]
 
-    async def test_history_endpoint(self):
+    async def test_history_endpoint(self, tmp_path, monkeypatch):
         from backend.api.updates import updates_history
+        monkeypatch.setattr(config, "UPDATES_DIR", tmp_path / "updates")
         body = await updates_history()
         assert body["history"] == []

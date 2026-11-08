@@ -14,6 +14,12 @@ from pathlib import Path
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+# ed25519 public key (hex) whose private half signs update manifests.
+# Generated once via tools/sign_keygen.py; the private key never lives in
+# the repository or the release machine's ordinary app folders. Empty means
+# every signature check fails closed — no key, no updates.
+UPDATE_SIGNING_PUBKEY = ""
+
 
 class SecurityError(Exception):
     """Raised when an update package or signature fails verification."""
