@@ -54,9 +54,11 @@ The UI opens at `http://127.0.0.1:5555`. Close the browser and the server shuts 
 
 ## Updates
 
-Soundloom does not auto-update. New releases go to [GitHub Releases](https://github.com/Eandab0t/Soundloom/releases). Download the new `Soundloom.exe`, replace the old one, and run it — your `data/` folder stays put.
+Soundloom never installs anything without your explicit approval. The built-in **Update Center** (sidebar → Update Center) checks a signed update manifest and shows exactly which components have new versions — frontend, integrations, or the application itself — for you to review, select, and approve individually. Downloads are staged and hash-verified; installs are atomic with automatic rollback.
 
-SHA-256 checksums are provided with each release so you can verify the integrity of downloaded files.
+User data lives in `%LOCALAPPDATA%\Soundloom` (migrated automatically from a legacy `data/` folder next to the exe on first run — the original is never deleted; create a `portable.flag` file inside `data/` to keep the old layout).
+
+For fully manual updates, new releases go to [GitHub Releases](https://github.com/Eandab0t/Soundloom/releases). Download the new build, replace the old one, and run it — your data is safe in `%LOCALAPPDATA%\Soundloom`.
 
 ## Support
 
