@@ -104,40 +104,8 @@ LOGS_DIR = DATA_DIR / "logs"
 TEMPLATES_DIR = ROOT / "templates"
 EXPORTS_DIR = DATA_DIR / "exports"
 
-
-def _resolve_frontend_dir(root: Path, bundle_root: Path) -> Path:
-    """Prefer a loose frontend/ in the install dir over the bundled copy.
-
-    The update system installs frontend updates as a loose directory next
-    to the exe; the bundled copy under _MEIPASS remains as the fallback.
-    In development both resolve to <repo>/frontend.
-    """
-    loose = root / "frontend"
-    if (loose / "index.html").exists():
-        return loose
-    return bundle_root / "frontend"
-
-
-def frontend_dir() -> Path:
-    """Current frontend directory, resolved on demand.
-
-    Frontend updates install a loose copy next to the exe; resolving per
-    call lets a running server pick it up without a restart. In dev both
-    candidates are the same repo directory.
-    """
-    return _resolve_frontend_dir(ROOT, _BUNDLE)
-
-
-FRONTEND_DIR = frontend_dir()
-
-# Component manifests describe every independently versioned piece of the
-# app (core, frontend, integrations). Bundled manifests live in _MEIPASS;
-# successful updates write override manifests into the user data dir.
-MANIFESTS_DIR = _BUNDLE / "manifests"
-USER_MANIFESTS_DIR = DATA_DIR / "manifests"
-UPDATES_DIR = DATA_DIR / "updates"
-UPDATE_STAGING_DIR = DATA_DIR / "update_staging"
-UPDATE_ROLLBACK_DIR = DATA_DIR / "backups" / "updates"
+# Read-only UI assets: bundled under _MEIPASS when frozen, the repo copy in dev.
+FRONTEND_DIR = _BUNDLE / "frontend"
 
 DEFAULTS = {
     "theme": "dark",
@@ -191,10 +159,6 @@ DEFAULTS = {
     # (sync, watch, search). Direct URLs always use their own source.
     "source_priority": ["youtube", "deezer", "soundcloud"],
     "source_fallback": True,         # failed search jobs try the next source
-    "auto_update": "notify",
-    # URL of the signed remote update manifest (updates.json). Empty means
-    # the Update Center is not configured and never contacts a server.
-    "update_manifest_url": "",
     "duplicate_policy": "keep_separate",
     "server_port": 5555,
     "server_host": "127.0.0.1",
@@ -227,8 +191,6 @@ def _ensure_dirs():
     COVERS_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    USER_MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
-    UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_settings() -> dict:

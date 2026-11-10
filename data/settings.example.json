@@ -40,8 +40,6 @@
     "soundcloud"
   ],
   "source_fallback": true,
-  "auto_update": "notify",
-  "update_manifest_url": "",
   "duplicate_policy": "keep_separate",
   "server_port": 5555,
   "server_host": "127.0.0.1",

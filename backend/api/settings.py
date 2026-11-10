@@ -83,7 +83,6 @@ class SettingsUpdate(BaseModel):
     duplicate_policy: Literal["skip", "overwrite", "keep_separate"] | None = None
     tag_case_mode: Literal["off", "lower", "title", "upper"] | None = None
     fetch_method: str | None = None
-    auto_update: Literal["notify", "always", "never"] | None = None
     backup_format: Literal["json", "none"] | None = None
     max_concurrent_downloads: int | None = Field(default=None, ge=1, le=8)
     max_retries: int | None = Field(default=None, ge=0, le=10)

@@ -122,28 +122,6 @@ class TestMigrateLegacyData:
         assert not target.exists()
 
 
-class TestResolveFrontendDir:
-    def test_loose_frontend_shadows_bundle(self, tmp_path):
-        root = tmp_path / "install"
-        loose = root / "frontend"
-        loose.mkdir(parents=True)
-        (loose / "index.html").touch()
-        bundle_root = tmp_path / "_internal"
-        assert config._resolve_frontend_dir(root, bundle_root) == loose
-
-    def test_falls_back_to_bundle(self, tmp_path):
-        root = tmp_path / "install"
-        root.mkdir()
-        bundle_root = tmp_path / "_internal"
-        assert config._resolve_frontend_dir(root, bundle_root) == bundle_root / "frontend"
-
-    def test_incomplete_loose_frontend_is_ignored(self, tmp_path):
-        root = tmp_path / "install"
-        (root / "frontend").mkdir(parents=True)  # exists but no index.html
-        bundle_root = tmp_path / "_internal"
-        assert config._resolve_frontend_dir(root, bundle_root) == bundle_root / "frontend"
-
-
 class TestModuleConstants:
     """The module-level constants must derive from the resolution rules."""
 

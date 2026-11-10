@@ -39,7 +39,6 @@ from backend.api.operations import router as operations_router
 from backend.api.attention import router as attention_router
 from backend.api.matches import router as matches_router
 from backend.api.forensics import router as forensics_router
-from backend.api.updates import router as updates_router
 
 setup_logging(config.LOGS_DIR)
 logger = logging.getLogger("soundloom")
@@ -91,24 +90,6 @@ async def lifespan(app: FastAPI):
     global _shutdown_task
     config._ensure_dirs()
     await init_db()
-    # Finish or undo any update install a crash interrupted, before the
-    # UI (which may have been replaced) is served.
-    try:
-        from backend.updater import manager as update_manager
-        update_actions = update_manager.reconcile()
-        if update_actions.get("actions"):
-            logger.info("Update reconciliation: %s", update_actions["actions"])
-    except Exception as ue:
-        logger.warning("Update reconciliation failed, continuing: %s", ue)
-    # Commit or roll back a core update applied by the external helper on
-    # the previous shutdown. Must happen before anything else starts.
-    try:
-        from backend.updater import core_update
-        core_actions = core_update.recover_on_startup()
-        if core_actions:
-            logger.info("Core update recovery: %s", core_actions)
-    except Exception as ce:
-        logger.warning("Core update recovery failed, continuing: %s", ce)
     from backend.services.downloader import start_worker, stop_worker, set_concurrency, reclaim_orphans
     from backend.services.operations import reconcile
     from backend.services.watcher import start_watcher, stop_watcher
@@ -203,13 +184,6 @@ async def lifespan(app: FastAPI):
     await start_watcher()
     if config.get("sync_enabled", True):
         await start_sync_loop()
-    # Everything above started cleanly: if a core update was applied by the
-    # helper, this successful startup is what verifies it.
-    try:
-        from backend.updater import core_update
-        core_update.mark_verified()
-    except Exception as ve:
-        logger.warning("Could not record core verification: %s", ve)
     _shutdown_task = asyncio.create_task(_auto_shutdown_watchdog())
     logger.info("Soundloom started on port %s", config.get("server_port", 5555))
     yield
@@ -242,13 +216,6 @@ async def lifespan(app: FastAPI):
         logger.warning("Could not stop content index cleanly: %s", ce)
 
     await close_db()
-    # A staged core update is applied by the external helper after this
-    # process exits; spawn it last so it cannot race the server.
-    try:
-        from backend.updater import core_update
-        core_update.spawn_helper()
-    except Exception as he:
-        logger.warning("Could not stage the core updater helper: %s", he)
     logger.info("Soundloom shut down")
 
 
@@ -284,7 +251,6 @@ app.include_router(operations_router)
 app.include_router(attention_router)
 app.include_router(matches_router)
 app.include_router(forensics_router)
-app.include_router(updates_router)
 
 FRONTEND_DIR = config.FRONTEND_DIR
 
@@ -295,13 +261,7 @@ class RevalidatingStaticFiles(StaticFiles):
     Plain StaticFiles sends no Cache-Control, so browsers heuristically cache
     JS/CSS and serve stale UI after an update. `no-cache` forces a cheap
     conditional request (304 on localhost) so edits show up on reload.
-    The serving directory is re-resolved per request so a frontend update
-    installed by the Update Center goes live without restarting the app.
     """
-
-    def lookup_path(self, path: str):
-        self.directory = str(config.frontend_dir())
-        return super().lookup_path(path)
 
     def file_response(self, *args, **kwargs):
         response = super().file_response(*args, **kwargs)
