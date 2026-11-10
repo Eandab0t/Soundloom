@@ -3,19 +3,20 @@
 Weaves new music into your library from the sources you follow: watched
 artists, synced playlists and one-off links.
 """
+# Import-path bootstrap only. backend.config is the single source of truth
+# for where the install dir, bundle, and user data live (config.ROOT /
+# config._BUNDLE); this block exists just to make `import backend` resolve
+# when frozen, before config can be imported.
 import sys
-import os
+from pathlib import Path
+
+_BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+if str(_BUNDLE) not in sys.path:
+    sys.path.insert(0, str(_BUNDLE))
+
 import asyncio
 import logging
-from pathlib import Path
 from contextlib import asynccontextmanager
-
-ROOT = Path(__file__).resolve().parent.parent
-if getattr(sys, "frozen", False):
-    # PyInstaller build: bundled modules live in _MEIPASS.
-    ROOT = Path(getattr(sys, "_MEIPASS", ROOT))
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
@@ -59,6 +60,7 @@ async def _auto_shutdown_watchdog():
     exits.
     """
     import signal
+    import os
     import time as _time
     while True:
         await asyncio.sleep(5)

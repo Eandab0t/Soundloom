@@ -134,7 +134,7 @@ export function coverImg(track, cls = 'track-cover') {
   // embedded art on demand and falls back to the app placeholder — so a
   // plain <img> is always safe. Lazy loading keeps big grids cheap.
   const id = typeof track === 'object' ? (track.id ?? track.cover_id) : track;
-  return `<img class="${cls}" src="/api/library/tracks/${id}/cover" alt="" loading="lazy" onerror="this.src='/static/img/logo.svg'">`;
+  return `<img class="${cls}" src="/api/library/tracks/${id}/cover" alt="" loading="lazy" onerror="this.src='/static/img/logo.png'">`;
 }
 
 // --- Artist autocomplete ---------------------------------------------------

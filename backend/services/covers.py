@@ -29,7 +29,7 @@ from ..database import fetch_one, execute
 
 logger = logging.getLogger(__name__)
 
-PLACEHOLDER = config.FRONTEND_DIR / "img" / "logo.svg"
+PLACEHOLDER = config.FRONTEND_DIR / "img" / "logo.png"
 
 _SIBLING_COVER_NAMES = ("cover.jpg", "cover.png", "folder.jpg", "folder.png", "art.jpg")
 
@@ -165,6 +165,6 @@ async def cover_response(track_id: int) -> FileResponse:
     if path and Path(path).is_file():
         return FileResponse(path, media_type=_media_type(path))
     if PLACEHOLDER.is_file():
-        return FileResponse(PLACEHOLDER, media_type="image/svg+xml")
+        return FileResponse(PLACEHOLDER, media_type="image/png")
     from fastapi import HTTPException
     raise HTTPException(404, "no cover available")

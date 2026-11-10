@@ -144,7 +144,7 @@ class TestCoverResponse:
             audio.write_bytes(b"\x00" * 64)
             tid = await _seed_track(audio)
             resp = await C.cover_response(tid)
-            assert resp.media_type == "image/svg+xml"
+            assert resp.media_type == "image/png"
         finally:
             await close_db()
 
