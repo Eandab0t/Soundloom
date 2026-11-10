@@ -241,7 +241,7 @@ app.mount("/static", RevalidatingStaticFiles(directory=str(FRONTEND_DIR)), name=
 
 @app.get("/")
 async def index():
-    return FileResponse(str(config.frontend_dir() / "index.html"))
+    return FileResponse(str(config.FRONTEND_DIR / "index.html"))
 
 
 @app.websocket("/ws/events")

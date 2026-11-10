@@ -34,7 +34,6 @@ a = Analysis(
     binaries=[],
     datas=[
         ("frontend", "frontend"),          # served by /static and as cover placeholder
-        ("manifests", "manifests"),        # component manifests read by /api/components
     ],
     hiddenimports=hidden,
     hookspath=[],
