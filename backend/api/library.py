@@ -197,13 +197,16 @@ async def delete_track(track_id: int):
 
 
 @router.get("/artists")
-async def list_artists(search: str = Query("", max_length=100)):
+async def list_artists(
+    search: str = Query("", max_length=100),
+    sort: str = Query("", max_length=10),
+):
     """Distinct library artists with track counts.
 
     With ?search=, returns a prefix-first, case-insensitive page of matches
     ordered by track count — shaped for autocomplete dropdowns (the frontend
-    caps at 8 suggestions). Ordered by count so the artist you most likely
-    mean tops the list; empty libraries return [].
+    caps at 8 suggestions). With ?sort=count, the plain listing is ordered
+    by track count instead of alphabetically. Empty libraries return [].
     """
     q = (search or "").strip()
     if q:
@@ -224,12 +227,14 @@ async def list_artists(search: str = Query("", max_length=100)):
             """,
             (like, like + "%"),
         )
-    return await fetch_all("""
+    order = ("track_count DESC, name COLLATE NOCASE ASC"
+             if sort == "count" else "name COLLATE NOCASE ASC")
+    return await fetch_all(f"""
         SELECT COALESCE(NULLIF(primary_artist,''), artist) as name,
                COUNT(*) as track_count, MIN(id) as cover_id
         FROM tracks
         WHERE file_status != 'missing' AND library_status != 'archived'
-        GROUP BY name ORDER BY name COLLATE NOCASE ASC
+        GROUP BY name ORDER BY {order}
     """)
 
 

@@ -71,6 +71,19 @@ class TestListArtists:
         finally:
             await close_db()
 
+    async def test_sort_count_orders_by_tracks(self, lib_db):
+        from backend.database import init_db, close_db
+        from backend.api.library import list_artists
+        await init_db()
+        try:
+            await _seed_artists()
+            artists = await list_artists(search="", sort="count")
+            names = [a["name"] for a in artists]
+            assert names[0] == "Inductive", "most tracks first"
+            assert names[1:] == sorted(names[1:], key=str.lower)
+        finally:
+            await close_db()
+
     async def test_search_empty_query_returns_all(self, lib_db):
         from backend.database import init_db, close_db
         from backend.api.library import list_artists

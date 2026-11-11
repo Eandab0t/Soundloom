@@ -32,6 +32,7 @@ const App = {
     this.wireEvents();
     Bus.connect();
 
+    Library.init();
     Library.loadTracks();
     Library.loadStats();
     Settings.load();

@@ -1,12 +1,24 @@
 /* Soundloom library tab — tracks / artists / albums views. */
-import { API, State, showToast, esc, fmtDuration, fmtSize, debounce, coverImg } from '../core.js';
+import { API, State, showToast, esc, fmtDuration, fmtSize, debounce, coverImg, attachArtistAutocomplete } from '../core.js';
 import { Player } from '../player.js';
 
 export const Library = {
   tracks: [], total: 0, page: 1, perPage: 100, sortBy: 'title', order: 'ASC',
   subView: 'tracks', _albumFilter: '', statusFilter: '', state: null,
-  _bfTimer: null, _moves: {},
+  artistSort: '', _bfTimer: null, _moves: {},
   selected: new Set(),
+
+  init() {
+    // Typing an artist name offers the artist (jump straight to their
+    // tracks) instead of only matching individual track titles.
+    attachArtistAutocomplete(document.getElementById('lib-search'), {
+      onSelect: (name) => {
+        const box = document.getElementById('lib-search');
+        if (box) box.value = '';
+        this.filterArtist(name);
+      },
+    });
+  },
 
   async loadTracks() {
     this.selected.clear();
@@ -694,20 +706,30 @@ export const Library = {
 
   async loadArtists() {
     try {
-      const data = await API.get('/api/library/artists');
+      const sortQ = this.artistSort === 'count' ? '?sort=count' : '';
+      const data = await API.get('/api/library/artists' + sortQ);
       const el = document.getElementById('lib-artists-view');
       const filter = document.getElementById('lib-artist-filter');
       filter.innerHTML = '<option value="">All artists</option>' +
         data.map(a => `<option value="${esc(a.name)}">${esc(a.name)} (${a.track_count})</option>`).join('');
-      el.innerHTML = data.length ? data.map(a => `
-        <div class="artist-row" data-artist="${esc(a.name)}">
-          ${coverImg(a)}
-          <span class="artist-name">${esc(a.name)}</span>
-          <span class="artist-count">${a.track_count} tracks</span>
+      el.innerHTML = data.length ? `
+        <div class="input-row" style="margin-bottom:10px; align-items:center;">
+          <strong style="font-size:13px;">${data.length} artist${data.length === 1 ? '' : 's'}</strong>
+          <select class="input sm" onchange="Library.artistSort = this.value; Library.loadArtists()">
+            <option value="" ${this.artistSort === '' ? 'selected' : ''}>Alphabetical</option>
+            <option value="count" ${this.artistSort === 'count' ? 'selected' : ''}>Most tracks</option>
+          </select>
         </div>
-      `).join('') : '<div class="empty-state"><p>No artists found</p></div>';
-      el.querySelectorAll('.artist-row').forEach(row => {
-        row.addEventListener('click', () => this.filterArtist(row.dataset.artist));
+        <div class="album-grid">${data.map(a => `
+          <div class="album-card artist-card" data-artist="${esc(a.name)}">
+            ${coverImg(a, 'album-cover')}
+            <div class="album-card-title">${esc(a.name)}</div>
+            <div class="album-card-meta">${a.track_count} track${a.track_count === 1 ? '' : 's'}</div>
+          </div>
+        `).join('')}</div>`
+        : '<div class="empty-state"><p>No artists found</p></div>';
+      el.querySelectorAll('.artist-card').forEach(card => {
+        card.addEventListener('click', () => this.filterArtist(card.dataset.artist));
       });
     } catch (e) { console.error(e); }
   },
