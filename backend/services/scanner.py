@@ -33,6 +33,30 @@ def _artist_columns(tags: dict) -> tuple[str, str, str]:
     parsed = parse_artists(tags.get("artist") or "")
     return parsed["primary"], ",".join(parsed["featured"]), parsed["display"]
 
+
+async def backfill_missing_artists() -> dict:
+    """Fill primary/featured/display for rows that predate the splitter.
+
+    Only writes rows whose primary_artist is empty, so identify/match
+    corrections are never touched and re-running after a partial failure
+    is harmless. Returns {examined, fixed}.
+    """
+    rows = await fetch_all(
+        "SELECT id, artist FROM tracks WHERE primary_artist = '' AND artist != ''"
+    )
+    fixed = 0
+    for row in rows:
+        primary, featured, display = _artist_columns(dict(row))
+        if not primary:
+            continue
+        await execute(
+            "UPDATE tracks SET primary_artist=?, featured_artists=?, "
+            "display_artist=? WHERE id=?",
+            (primary, featured, display, row["id"]),
+        )
+        fixed += 1
+    return {"examined": len(rows), "fixed": fixed}
+
 _scan_state = {"scanning": False, "total": 0, "processed": 0,
                "added": 0, "updated": 0, "missing": 0, "errors": 0}
 

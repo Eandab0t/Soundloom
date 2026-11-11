@@ -128,3 +128,47 @@ async def test_scan_folder_fills_empty_primary_on_rescan(lib_db, tmp_path, monke
     corr_row = await db.fetch_one(
         "SELECT primary_artist FROM tracks WHERE file_path=?", (corrected,))
     assert corr_row["primary_artist"] == "Corrected"
+
+
+class TestBackfillMissingArtists:
+    async def test_fills_empty_primary_only(self, lib_db):
+        # Empty-primary comma credit: filled.
+        await db.execute(
+            "INSERT INTO tracks (file_path, title, artist, album_artist, album,"
+            " format, file_status) VALUES ('a.mp3', 'T', 'bunii, ayowitty',"
+            " 'bunii', 'A', 'mp3', 'present')"
+        )
+        # Set primary: untouched. Empty artist: skipped.
+        await db.execute(
+            "INSERT INTO tracks (file_path, title, artist, primary_artist,"
+            " album_artist, album, format, file_status) VALUES ('b.mp3', 'T',"
+            " 'bunii', 'Corrected', 'bunii', 'A', 'mp3', 'present')"
+        )
+        await db.execute(
+            "INSERT INTO tracks (file_path, title, artist, album_artist, album,"
+            " format, file_status) VALUES ('c.mp3', 'T', '', '', 'A', 'mp3',"
+            " 'present')"
+        )
+
+        result = await scanner.backfill_missing_artists()
+
+        assert result == {"examined": 1, "fixed": 1}
+        row = await db.fetch_one(
+            "SELECT primary_artist, featured_artists FROM tracks"
+            " WHERE file_path='a.mp3'")
+        assert row["primary_artist"] == "bunii"
+        assert row["featured_artists"] == "ayowitty"
+        kept = await db.fetch_one(
+            "SELECT primary_artist FROM tracks WHERE file_path='b.mp3'")
+        assert kept["primary_artist"] == "Corrected"
+
+    async def test_repeated_runs_are_harmless(self, lib_db):
+        await db.execute(
+            "INSERT INTO tracks (file_path, title, artist, album_artist, album,"
+            " format, file_status) VALUES ('a.mp3', 'T', 'bunii, ayowitty',"
+            " 'bunii', 'A', 'mp3', 'present')"
+        )
+        first = await scanner.backfill_missing_artists()
+        second = await scanner.backfill_missing_artists()
+        assert first == {"examined": 1, "fixed": 1}
+        assert second == {"examined": 0, "fixed": 0}
