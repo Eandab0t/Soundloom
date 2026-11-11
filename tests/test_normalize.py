@@ -127,6 +127,24 @@ class TestParseArtists:
         r = parse_artists("")
         assert r["primary"] == ""
 
+    def test_comma_credit_lands_under_first(self):
+        r = parse_artists("bunii, ayowitty")
+        assert r["primary"] == "bunii"
+        assert r["featured"] == ["ayowitty"]
+        assert r["display"] == "bunii feat. ayowitty"
+        assert r["album_artist"] == "bunii"
+
+    def test_ampersand_names_stay_whole(self):
+        r = parse_artists("Simon & Garfunkel")
+        assert r["primary"] == "Simon & Garfunkel"
+        assert r["featured"] == []
+
+    def test_ft_display_preserved(self):
+        r = parse_artists("A ft. B & C")
+        assert r["primary"] == "A"
+        assert r["featured"] == ["B", "C"]
+        assert r["display"] == "A ft. B & C"
+
 
 class TestIsVariantMatch:
     def test_same(self):

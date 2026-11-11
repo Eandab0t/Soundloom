@@ -88,7 +88,22 @@ def parse_artists(raw: str) -> dict:
         feat_str = feat_match.group(1).strip()
         featured = [a.strip() for a in re.split(r",\s*|&\s*|\s+and\s+", feat_str) if a.strip()]
 
-    display = raw
+    # Comma-separated credit lists group under the first credit:
+    # "bunii, ayowitty" -> primary "bunii", featured ["ayowitty"].
+    # (Known trade-off: a band whose name contains a comma — "Earth, Wind
+    # & Fire" — fragments; display_artist keeps the full raw credit.)
+    split_credit = False
+    if "," in primary:
+        parts = [p.strip() for p in primary.split(",") if p.strip()]
+        if len(parts) > 1:
+            primary = parts[0]
+            featured = parts[1:] + featured
+            split_credit = True
+
+    if split_credit:
+        display = primary + (" feat. " + ", ".join(featured) if featured else "")
+    else:
+        display = raw
     album_artist = primary
 
     return {

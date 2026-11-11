@@ -16,11 +16,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..database import fetch_one, fetch_all, execute
+from ..pipeline.normalize import parse_artists
 from .. import config
 from .tagger import read_tags, AUDIO_EXTENSIONS
 from . import acquisition
 
 logger = logging.getLogger(__name__)
+
+
+def _artist_columns(tags: dict) -> tuple[str, str, str]:
+    """Split a raw credit into (primary, comma-joined featured, display).
+
+    Same convention as operations.index_file, so a scanned file is indexed
+    exactly like a downloaded one. Album artist is left as tagged.
+    """
+    parsed = parse_artists(tags.get("artist") or "")
+    return parsed["primary"], ",".join(parsed["featured"]), parsed["display"]
 
 _scan_state = {"scanning": False, "total": 0, "processed": 0,
                "added": 0, "updated": 0, "missing": 0, "errors": 0}
@@ -405,31 +416,37 @@ async def _scan_and_reconcile(folder: str) -> int:
         file_size = fp.stat().st_size if fp.exists() else 0
 
         normalized_path = str(fp.resolve()).casefold()
+        primary, featured, display = _artist_columns(tags)
         if normalized_path in db_paths:
             await execute("""
                 UPDATE tracks SET title=?, artist=?, album_artist=?, album=?,
                 track_number=?, disc_number=?, year=?, genre=?, duration=?,
                 file_size=?, format=?, bitrate=?, sample_rate=?,
+                primary_artist=CASE WHEN primary_artist='' THEN ? ELSE primary_artist END,
+                featured_artists=CASE WHEN featured_artists='' THEN ? ELSE featured_artists END,
+                display_artist=CASE WHEN display_artist='' THEN ? ELSE display_artist END,
                 file_status='present', updated_at=?
                 WHERE file_path=?
             """, (
                 tags["title"], tags["artist"], tags["album_artist"], tags["album"],
                 tags["track_number"], tags["disc_number"], tags["year"], tags["genre"],
                 tags["duration"], file_size, tags["format"], tags["bitrate"],
-                tags["sample_rate"], _utcnow_iso(), db_paths[normalized_path][1],
+                tags["sample_rate"], primary, featured, display,
+                _utcnow_iso(), db_paths[normalized_path][1],
             ))
             _scan_state["updated"] += 1
         else:
             await execute("""
-                INSERT INTO tracks (file_path, title, artist, album_artist, album,
+                INSERT INTO tracks (file_path, title, artist, primary_artist,
+                featured_artists, display_artist, album_artist, album,
                 track_number, disc_number, year, genre, duration, file_size, format,
                 bitrate, sample_rate, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                str(fp), tags["title"], tags["artist"], tags["album_artist"],
-                tags["album"], tags["track_number"], tags["disc_number"],
-                tags["year"], tags["genre"], tags["duration"], file_size,
-                tags["format"], tags["bitrate"], tags["sample_rate"],
+                str(fp), tags["title"], tags["artist"], primary, featured, display,
+                tags["album_artist"], tags["album"], tags["track_number"],
+                tags["disc_number"], tags["year"], tags["genre"], tags["duration"],
+                file_size, tags["format"], tags["bitrate"], tags["sample_rate"],
                 _utcnow_iso(), _utcnow_iso(),
             ))
             _scan_state["added"] += 1
@@ -448,31 +465,37 @@ async def scan_single_file(file_path: str) -> dict:
     existing = await fetch_one("SELECT id FROM tracks WHERE file_path = ?", (str(p),))
     tags = await read_tags(file_path)
     file_size = p.stat().st_size if p.exists() else 0
+    primary, featured, display = _artist_columns(tags)
 
     if existing:
         await execute("""
             UPDATE tracks SET title=?, artist=?, album_artist=?, album=?,
             track_number=?, disc_number=?, year=?, genre=?, duration=?,
             file_size=?, format=?, bitrate=?, sample_rate=?,
+            primary_artist=CASE WHEN primary_artist='' THEN ? ELSE primary_artist END,
+            featured_artists=CASE WHEN featured_artists='' THEN ? ELSE featured_artists END,
+            display_artist=CASE WHEN display_artist='' THEN ? ELSE display_artist END,
             file_status='present', updated_at=?
             WHERE file_path=?
         """, (
             tags["title"], tags["artist"], tags["album_artist"], tags["album"],
             tags["track_number"], tags["disc_number"], tags["year"], tags["genre"],
             tags["duration"], file_size, tags["format"], tags["bitrate"],
-            tags["sample_rate"], _utcnow_iso(), str(p),
+            tags["sample_rate"], primary, featured, display,
+            _utcnow_iso(), str(p),
         ))
     else:
-            await execute("""
-                INSERT INTO tracks (file_path, title, artist, album_artist, album,
-                track_number, disc_number, year, genre, duration, file_size, format,
-                bitrate, sample_rate, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                str(p), tags["title"], tags["artist"], tags["album_artist"],
-                tags["album"], tags["track_number"], tags["disc_number"],
-                tags["year"], tags["genre"], tags["duration"], file_size,
-                tags["format"], tags["bitrate"], tags["sample_rate"],
-                _utcnow_iso(), _utcnow_iso(),
-            ))
+        await execute("""
+            INSERT INTO tracks (file_path, title, artist, primary_artist,
+            featured_artists, display_artist, album_artist, album,
+            track_number, disc_number, year, genre, duration, file_size, format,
+            bitrate, sample_rate, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(p), tags["title"], tags["artist"], primary, featured, display,
+            tags["album_artist"], tags["album"], tags["track_number"],
+            tags["disc_number"], tags["year"], tags["genre"], tags["duration"],
+            file_size, tags["format"], tags["bitrate"], tags["sample_rate"],
+            _utcnow_iso(), _utcnow_iso(),
+        ))
     return tags
